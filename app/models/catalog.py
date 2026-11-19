@@ -20,7 +20,6 @@ from django.conf import settings
 import logging
 
 logger = logging.getLogger(__name__)
-from .constants import REMOVE_BG_API_KEY
 
 # Brand model to store brand details
 class Brand(models.Model):
@@ -142,18 +141,6 @@ class Product(models.Model):
         status = "✓" if self.is_active else "✗"
         return f"{status} {self.name} (Barcode: {self.barcode or 'N/A'})"
     
-    def remove_background_via_api(self, image_bytes):
-        """Public API se background remove karne ka method"""
-        response = requests.post(
-            'https://api.remove.bg/v1.0/removebg',
-            files={'image_file': image_bytes},
-            data={'size': 'auto'},
-            headers={'X-Api-Key': REMOVE_BG_API_KEY},
-        )
-        if response.status_code == requests.codes.ok:
-            return response.content
-        return None
-
     def save(self, *args, **kwargs):
         # ========================================== #
         # ✅ DISCOUNT PRICE AUTO-CALCULATE            #
@@ -177,46 +164,46 @@ class Product(models.Model):
         if not self.use_custom_barcode and not self.barcode:
             self.barcode = self.generate_barcode()
             
-        # ✅ API via Background Removal & Image Compression Logic
+        # ✅ Image Resize & Compression Logic (WebP)
         if self.image and not getattr(self, '_image_processed', False):
             try:
                 # Original image content Read karein
                 self.image.open()
                 image_bytes = self.image.read()
 
-                # 1. API Call karke BG Remove karein
-                api_result = self.remove_background_via_api(image_bytes)
-                
-                if api_result:
-                    img = Image.open(BytesIO(api_result))
-                else:
-                    # If the API fails or the limit is reached, fall back to the original image processing
-                    img = Image.open(BytesIO(image_bytes))
+                img = Image.open(BytesIO(image_bytes))
 
-                # 2. Transparent RGBA format conversion
+                # 1. RGBA format conversion
                 if img.mode != 'RGBA':
                     img = img.convert('RGBA')
 
-                # 3. Resize (Max 800x800 resolution for fast loading)
+                # 2. Resize (Max 800x800 resolution for fast loading)
                 max_size = (800, 800)
                 img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
-                # 4. Compress & Save into WebP format (Ultra lightweight)
+                # 3. Compress & Save into WebP format (Ultra lightweight)
                 buffer = BytesIO()
                 img.save(buffer, format='WEBP', optimize=True, quality=80)
                 buffer.seek(0)
 
-                # 5. Update the file extension to .webp
+                # 4. Update the file extension to .webp
                 base_name = os.path.splitext(os.path.basename(self.image.name))[0]
                 new_filename = f"{base_name}.webp"
 
                 # Set a flag to prevent an infinite loop
                 self._image_processed = True
 
-                # 6. Processed file attach karein (Cloudinary Storage automatically handles this upload)
+                # 5. Processed file attach karein (Cloudinary Storage automatically handles this upload)
                 self.image.save(new_filename, ContentFile(buffer.getvalue()), save=False)
-            except Exception as e:
-                pass
+            except Exception:
+                # Processing fail ho to original image hi upload hogi.
+                # File pointer read() ke baad end par hota hai, isliye wapas shuru par lao
+                # warna Cloudinary ko 0-byte file milti hai ("Empty file" error).
+                logger.exception("Product image processing failed; uploading original image")
+                try:
+                    self.image.seek(0)
+                except Exception:
+                    pass
 
         super().save(*args, **kwargs)
     
