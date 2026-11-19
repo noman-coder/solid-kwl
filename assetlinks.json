@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "store.khanewalconnect.app",
+        "sha256_cert_fingerprints": ["13:20:4D:EF:2F:DE:44:D1:64:57:6E:06:C3:DD:1A:A9:DC:06:80:C9:AE:9C:35:3A:F5:E0:C6:49:8F:7F:23:F6"]
+      }
+    }]

@@ -1,0 +1,6 @@
+{% load whatsapp_tags %}{% wa_support_url order.order_no as wa_url %}{% if wa_url %}
+<a href="{{ wa_url }}" target="_blank" rel="noopener noreferrer"
+   style="display:inline-flex;align-items:center;gap:8px;margin:10px 0 4px;padding:9px 16px;border-radius:24px;background:#25D366;color:#fff;font-weight:700;font-size:.9rem;text-decoration:none;box-shadow:0 4px 12px rgba(37,211,102,.35);">
+    <i class="bi bi-whatsapp"></i> Support se WhatsApp par baat karein
+</a>
+{% endif %}

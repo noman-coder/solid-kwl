@@ -1,0 +1,39 @@
+{% extends 'legal/_legal_base.html' %}
+{% block body %}
+<div class="card">
+  <p>You can delete your {{ company_name }} account and your personal data at any time. Choose the option that matches your account.</p>
+</div>
+
+<div class="card">
+  <h2>Option 1: Delete inside the app (fastest)</h2>
+  <ol class="steps">
+    <li><strong>Customer:</strong> log in, open <em>My Account</em>, tap <em>Delete Account</em>, enter your password and confirm.</li>
+    <li><strong>Vendor:</strong> log in to the Vendor Dashboard, scroll to <em>Delete Account</em>, enter your password and confirm.</li>
+    <li><strong>Rider:</strong> log in, open the <em>Kamai</em> (Earnings) tab, tap <em>Delete Account</em>, enter your password and confirm.</li>
+  </ol>
+  <p class="note">If you still have an active order or delivery, finish or cancel it first, then delete.</p>
+  <p><a class="btn" href="{% url 'customer_login' %}">Log in</a></p>
+</div>
+
+<div class="card">
+  <h2>Option 2: Ask us to delete it</h2>
+  <p>If you cannot log in, contact us from the phone number or email registered on your account and ask for account deletion. We may ask you to verify it is really you.</p>
+  <ul>
+    {% if company_email %}<li>Email: <a href="mailto:{{ company_email }}?subject=Delete%20my%20account">{{ company_email }}</a></li>{% endif %}
+    {% if company_phone %}<li>Phone / WhatsApp: <a href="tel:{{ company_phone }}">{{ company_phone }}</a></li>{% endif %}
+  </ul>
+  <p class="note">We aim to complete requests within 7 days.</p>
+</div>
+
+<div class="card">
+  <h2>What gets deleted and what is kept</h2>
+  <div class="tbl"><table>
+    <tr><th>Deleted</th><th>Kept (without your identity)</th></tr>
+    <tr>
+      <td>Name, phone number, email, saved addresses, profile photo, chat messages, OTP records, login/password, store details and logo (vendors), vehicle and contact details (riders).</td>
+      <td>Order numbers, items, amounts and dates, and payment/settlement totals. These are anonymized (shown as "Deleted User") and kept only because tax and accounting law requires business records.</td>
+    </tr>
+  </table></div>
+  <p class="note" style="margin-top:10px">Deletion is permanent and cannot be undone. You can register again later with a new account.</p>
+</div>
+{% endblock %}
