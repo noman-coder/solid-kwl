@@ -1416,16 +1416,14 @@
 
     <div class="row-head" style="margin-bottom:2px"><h2>{% if search %}Results{% elif selected_category_name %}{{ selected_category_name }}{% else %}All products{% endif %}</h2></div>
 
-    <!-- Live Visitor (FIX: always show if count >= 1) -->
-    {% if live_visitor_count %}
-    <div class="live-visitors-banner" id="liveVisitorsBanner">
+    <!-- Live Visitor: sirf tab dikhe jab count 100 ya zyada ho (JS bhi yehi rule lagata hai) -->
+    <div class="live-visitors-banner" id="liveVisitorsBanner"{% if live_visitor_count|default:0 < 100 %} style="display:none"{% endif %}>
         <div class="live-dot"></div>
         <span class="live-text">
-            <strong id="liveCount">{{ live_visitor_count }}</strong> 
-            <span id="liveLabel">{% if live_visitor_count == 1 %}person viewing{% else %}people viewing{% endif %}</span>
+            <strong id="liveCount">{{ live_visitor_count|default:0 }}</strong> 
+            <span id="liveLabel">people viewing</span>
         </span>
     </div>
-    {% endif %}
     
     <!-- Typo Correction Banner -->
     {% if typo_corrected %}
@@ -1729,10 +1727,11 @@
 <!-- Live Visitor Count Auto-Update -->
 <script>
 (function() {
+    const LIVE_MIN = 100;   // is se kam ho to banner chhupa rahe
     const liveCountEl = document.getElementById('liveCount');
-    const liveLabelEl = document.getElementById('liveLabel');
+    const liveBannerEl = document.getElementById('liveVisitorsBanner');
     
-    if (!liveCountEl) return;
+    if (!liveCountEl || !liveBannerEl) return;
     
     let currentCount = parseInt(liveCountEl.textContent) || 0;
     
@@ -1743,8 +1742,10 @@
             
             if (data.success && data.count !== currentCount) {
                 liveCountEl.textContent = data.count;
-                liveLabelEl.textContent = data.count === 1 ? 'person viewing' : 'people viewing';
                 currentCount = data.count;
+            }
+            if (data.success) {
+                liveBannerEl.style.display = currentCount >= LIVE_MIN ? '' : 'none';
             }
         } catch (error) {}
     }
