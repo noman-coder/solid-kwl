@@ -4,7 +4,7 @@ import os
 from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings
-from django.http import JsonResponse, Http404
+from django.http import HttpResponse, JsonResponse, Http404
 from django.shortcuts import redirect
 from django.views.static import serve
 from app import pwa_views
@@ -24,6 +24,11 @@ def assetlinks(request):
     return JsonResponse(data, safe=False)
 
 
+def google_site_verification(request):
+    """Google Search Console ownership file, always public."""
+    return HttpResponse('google-site-verification: google2194f09a4937757a.html', content_type='text/html')
+
+
 urlpatterns = [
     # PWA: own manifest + service worker (keep FIRST, always public)
     path('manifest.json', pwa_views.pwa_manifest, name='pwa_manifest'),
@@ -32,6 +37,9 @@ urlpatterns = [
 
     # Play Store (TWA) verification, keep public
     path('.well-known/assetlinks.json', assetlinks, name='assetlinks'),
+
+    # Google Search Console verification (public)
+    path('google2194f09a4937757a.html', google_site_verification, name='google_site_verification'),
 
     # Admin Panel
     path('admin/', admin.site.urls),
