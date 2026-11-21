@@ -2,9 +2,13 @@ name: Django CI/CD Pipeline
 
 # DB design: MySQL runs ONLY on the GitHub runner (service container).
 # Persistence = encrypted snapshots on Google Drive (rclone, folder "hassan_shops").
-#   start of run : restore latest snapshot -> local MySQL (first ever run: fresh DB)
-#   every 30 min : snapshot -> Drive
-#   end of run   : stop server, final snapshot -> Drive, keep latest 10
+#   start of run : restore latest snapshot -> local MySQL
+#                  (if Drive cannot be read / no snapshot / wrong key => STOP, never start an empty DB by accident)
+#   migrations   : SAFE MODE - never drops a table or column (RemoveField / DeleteModel / DROP SQL are skipped)
+#   every 30 min : snapshot -> Drive (verified: decrypt + gzip test + listed on Drive)
+#   end of run   : stop server, final snapshot -> Drive
+#   retention    : last 100 complete snapshots (db_snapshot_*) + last 10 pre_migrate_* snapshots
+#   alerts       : every snapshot / restore / migration problem is sent to ntfy (hassan_shops_db)
 # No Aiven / cloud MySQL anywhere.
 
 on:
@@ -14,6 +18,10 @@ on:
     inputs:
       restore_action:
         description: 'Empty = latest. Or snapshot file name to restore, or "list" to print available snapshots.'
+        required: false
+        default: ''
+      fresh_start:
+        description: 'ONLY for the very first run (nothing on Drive yet): type yes. Otherwise leave empty.'
         required: false
         default: ''
   repository_dispatch:
@@ -70,6 +78,8 @@ jobs:
       RUNNING_IN_TERMUX: "false"
 
     steps:
+      - name: Record job start time
+        run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -157,6 +167,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VAL: ${{ github.event.inputs.restore_action }}
+          INPUT_FRESH: ${{ github.event.inputs.fresh_start }}
           CLIENT_PAYLOAD_FILE: ${{ github.event.client_payload.file }}
         run: |
           RESTORE_TARGET="latest"
@@ -171,10 +182,12 @@ jobs:
             if [ -n "$INPUT_VAL" ]; then RESTORE_TARGET="$INPUT_VAL"; fi
           fi
           echo "RESTORE_TARGET=$RESTORE_TARGET" >> "$GITHUB_ENV"
+          echo "FRESH_START=${INPUT_FRESH:-}" >> "$GITHUB_ENV"
           echo "Restore target: $RESTORE_TARGET"
 
       - name: Setup Rclone & Snapshot Helpers
         run: |
+          [ -n "${BACKUP_SECRET_KEY:-}" ] || { echo "::error::BACKUP_SECRET_KEY secret is empty"; exit 1; }
           mkdir -p "$HOME/.config/rclone"
           echo "$RCLONE_CONFIG_DATA" > "$HOME/.config/rclone/rclone.conf"
           REMOTE_NAME=$(rclone listremotes | head -n 1 | tr -d ':')
@@ -182,30 +195,55 @@ jobs:
           echo "DRIVE_DIR=${REMOTE_NAME}:hassan_shops" >> "$GITHUB_ENV"
           echo "HELPER_DIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
 
-          # --- encrypt / decrypt helper (same Fernet scheme as old snapshots) ---
+          # --- encrypt / decrypt helper (same Fernet scheme as old snapshots) + key fingerprint ---
           cat > "$RUNNER_TEMP/crypt.py" <<'PYEOF'
-          import base64, os, sys
+          import base64, hashlib, os, sys
           from cryptography.fernet import Fernet
           from cryptography.hazmat.primitives import hashes
           from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-          mode, src, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+          mode = sys.argv[1]
           kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
                            salt=b'django_backup_salt_2026', iterations=100000)
-          f = Fernet(base64.urlsafe_b64encode(kdf.derive(os.environ['BACKUP_SECRET_KEY'].encode())))
+          raw_key = kdf.derive(os.environ['BACKUP_SECRET_KEY'].encode())
+          if mode == 'fp':
+              # short fingerprint of the key (cannot be turned back into the key):
+              # used to detect that BACKUP_SECRET_KEY was changed
+              print(hashlib.sha256(b'fp:' + raw_key).hexdigest()[:16])
+              sys.exit(0)
+          src, dst = sys.argv[2], sys.argv[3]
+          f = Fernet(base64.urlsafe_b64encode(raw_key))
           data = open(src, 'rb').read()
           open(dst, 'wb').write(f.encrypt(data) if mode == 'enc' else f.decrypt(data))
           PYEOF
 
-          # --- snapshot script: dump -> sanity check -> encrypt -> upload -> rotate (keep 10) ---
+          # --- alert helper (ntfy) ---
+          cat > "$RUNNER_TEMP/notify.sh" <<'NFEOF'
+          #!/usr/bin/env bash
+          # usage: notify.sh "Title" "message" [tags] [topic]   (title must be plain ASCII)
+          TITLE="${1:-Alert}"; MSG="${2:-}"; TAGS="${3:-warning}"; TOPIC="${4:-hassan_shops_db}"
+          curl -s -m 20 -H "Title: $TITLE" -H "Tags: $TAGS" -H "Priority: high" \
+            -d "$MSG (run ${GITHUB_RUN_ID:-?})" "ntfy.sh/$TOPIC" > /dev/null || true
+          NFEOF
+          chmod +x "$RUNNER_TEMP/notify.sh"
+
+          # --- snapshot script: dump -> sanity check -> encrypt -> verify -> upload -> verify upload -> rotate ---
           cat > "$RUNNER_TEMP/snapshot.sh" <<'SHEOF'
           #!/usr/bin/env bash
-          # usage: snapshot.sh <periodic|final>
+          # usage: snapshot.sh <periodic|final|premigrate>
           MODE="${1:-periodic}"
           cd "$GITHUB_WORKSPACE"
           exec 9>"$HELPER_DIR/snapshot.lock"
           flock 9
           set -uo pipefail
+
+          alert() { bash "$HELPER_DIR/notify.sh" "$1" "$2" "${3:-rotating_light}"; }
+
+          if [ "$MODE" = "premigrate" ]; then
+            PREFIX="pre_migrate"; KEEP=10      # protected copy taken right before migrations
+          else
+            PREFIX="db_snapshot"; KEEP=100     # last 100 complete snapshots
+          fi
 
           # --- license.key lives in a file, not in the DB: keep a copy on Drive (only when it changed) ---
           if [ -f license.key ]; then
@@ -215,18 +253,21 @@ jobs:
                 && rclone copyto "$HELPER_DIR/license.key.enc" "$DRIVE_DIR/license.key.enc" \
                 && echo "$LH" > "$HELPER_DIR/license_hash" \
                 && echo "[snapshot:$MODE] license.key saved to Drive" \
-                || echo "[snapshot:$MODE] license.key upload FAILED"
+                || { echo "[snapshot:$MODE] license.key upload FAILED"; alert "license.key upload FAILED" "license.key Drive par save nahi hui"; }
             fi
           fi
 
           TS=$(date +"%Y%m%d_%H%M%S")
-          NAME="db_snapshot_${TS}.sql.gz.enc"
+          NAME="${PREFIX}_${TS}.sql.gz.enc"
           RAW="$HELPER_DIR/raw_${TS}.sql.gz"
+          VERIFY="$HELPER_DIR/verify_${TS}.sql.gz"
 
           if ! MYSQL_PWD=root mysqldump -h 127.0.0.1 -P 3306 -u root \
                 --set-gtid-purged=OFF --column-statistics=0 --single-transaction \
                 --no-tablespaces local_django_db | gzip > "$RAW"; then
-            echo "[snapshot:$MODE] mysqldump FAILED - nothing uploaded"; exit 1
+            echo "[snapshot:$MODE] mysqldump FAILED - nothing uploaded"
+            alert "DB snapshot FAILED ($MODE)" "mysqldump fail hui, kuch upload nahi hua"
+            rm -f "$RAW"; exit 1
           fi
 
           NEW_SIZE=$(stat -c %s "$RAW")
@@ -234,24 +275,49 @@ jobs:
           # Safety: never overwrite good history with a near-empty dump
           if [ "$NEW_SIZE" -lt 5000 ] || { [ "$OLD_SIZE" -gt 0 ] && [ "$NEW_SIZE" -lt $((OLD_SIZE / 2)) ]; }; then
             echo "[snapshot:$MODE] SUSPICIOUS dump size ($NEW_SIZE bytes vs restored $OLD_SIZE) - upload skipped"
-            curl -s -H "Title: DB snapshot SKIPPED (suspicious size)" -H "Tags: warning" \
-              -d "new=$NEW_SIZE restored=$OLD_SIZE run=$GITHUB_RUN_ID" ntfy.sh/hassan_shops_db || true
+            alert "DB snapshot SKIPPED (suspicious size)" "new=$NEW_SIZE restored=$OLD_SIZE mode=$MODE" "warning"
             rm -f "$RAW"; exit 1
           fi
 
-          python "$HELPER_DIR/crypt.py" enc "$RAW" "$HELPER_DIR/$NAME" || { echo "encrypt failed"; exit 1; }
-          rclone copyto "$HELPER_DIR/$NAME" "$DRIVE_DIR/$NAME" || { echo "upload failed"; exit 1; }
+          python "$HELPER_DIR/crypt.py" enc "$RAW" "$HELPER_DIR/$NAME" || {
+            echo "encrypt failed"; alert "DB snapshot FAILED ($MODE)" "encrypt fail hua"; rm -f "$RAW"; exit 1; }
+
+          # the snapshot must be restorable: decrypt + gzip test BEFORE it is uploaded
+          if ! python "$HELPER_DIR/crypt.py" dec "$HELPER_DIR/$NAME" "$VERIFY" || ! gzip -t "$VERIFY"; then
+            echo "[snapshot:$MODE] verify FAILED - not uploaded"
+            alert "DB snapshot FAILED ($MODE)" "verify (decrypt + gzip test) fail hua, upload nahi kiya"
+            rm -f "$RAW" "$VERIFY" "$HELPER_DIR/$NAME"; exit 1
+          fi
+          rm -f "$VERIFY"
+
+          UP=0
+          for i in 1 2 3; do
+            if rclone copyto "$HELPER_DIR/$NAME" "$DRIVE_DIR/$NAME" \
+               && rclone lsf "$DRIVE_DIR" --include "$NAME" | grep -qx "$NAME"; then
+              UP=1; break
+            fi
+            echo "[snapshot:$MODE] upload attempt $i failed"; sleep 10
+          done
+          if [ "$UP" != "1" ]; then
+            echo "[snapshot:$MODE] upload FAILED"
+            alert "DB snapshot FAILED ($MODE)" "Drive par upload 3 dafa fail hua"
+            rm -f "$RAW" "$HELPER_DIR/$NAME"; exit 1
+          fi
           rm -f "$RAW" "$HELPER_DIR/$NAME"
           echo "[snapshot:$MODE] uploaded $NAME ($NEW_SIZE bytes raw)"
 
-          # rotation: keep the latest 10 snapshots
-          rclone lsjson "$DRIVE_DIR" --files-only --include "db_snapshot_*" \
-            | jq -r 'sort_by(.ModTime) | .[].Name' > "$HELPER_DIR/all_snaps.txt"
-          TOTAL=$(wc -l < "$HELPER_DIR/all_snaps.txt")
-          if [ "$TOTAL" -gt 10 ]; then
-            head -n $((TOTAL - 10)) "$HELPER_DIR/all_snaps.txt" | while read -r F; do
-              [ -n "$F" ] && rclone deletefile "$DRIVE_DIR/$F" && echo "rotated out: $F"
-            done
+          # rotation: keep the latest $KEEP snapshots of this kind (only when the listing worked)
+          if rclone lsjson "$DRIVE_DIR" --files-only --include "${PREFIX}_*" > "$HELPER_DIR/rot_list.json" 2>/dev/null \
+             && jq -r 'sort_by(.ModTime) | .[].Name' "$HELPER_DIR/rot_list.json" > "$HELPER_DIR/all_snaps.txt"; then
+            TOTAL=$(wc -l < "$HELPER_DIR/all_snaps.txt")
+            echo "[snapshot:$MODE] $TOTAL ${PREFIX}_* snapshots on Drive (keeping $KEEP)"
+            if [ "$TOTAL" -gt "$KEEP" ]; then
+              head -n $((TOTAL - KEEP)) "$HELPER_DIR/all_snaps.txt" | while read -r F; do
+                [ -n "$F" ] && rclone deletefile "$DRIVE_DIR/$F" && echo "rotated out: $F"
+              done
+            fi
+          else
+            echo "[snapshot:$MODE] rotation skipped (could not list Drive) - nothing deleted"
           fi
 
           if [ "$MODE" = "final" ]; then
@@ -261,64 +327,170 @@ jobs:
           SHEOF
           chmod +x "$RUNNER_TEMP/snapshot.sh"
 
-      - name: Restore Database from Google Drive (or start fresh)
+          # --- SAFE MODE migrate: never drops tables / columns ---
+          cat > "$RUNNER_TEMP/safe_migrate.py" <<'SMEOF'
+          import os, re, subprocess, sys
+          sys.path.insert(0, os.getcwd())
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'P1.settings')
+          import django
+          django.setup()
+          from django.core.management import call_command
+          from django.db.migrations import operations as ops
+
+          SKIPPED = []
+          DANGER = re.compile(r'\b(DROP\s+(TABLE|DATABASE|SCHEMA|COLUMN)|TRUNCATE|DELETE\s+FROM)\b', re.I)
+
+          def _skip_remove_field(self, app_label, schema_editor, from_state, to_state):
+              SKIPPED.append('RemoveField %s.%s.%s (column kept in DB)' % (app_label, self.model_name, self.name))
+
+          def _skip_delete_model(self, app_label, schema_editor, from_state, to_state):
+              SKIPPED.append('DeleteModel %s.%s (table kept in DB)' % (app_label, self.name))
+
+          _orig_runsql = ops.RunSQL.database_forwards
+
+          def _safe_runsql(self, app_label, schema_editor, from_state, to_state):
+              stmts = self.sql if isinstance(self.sql, (list, tuple)) else [self.sql]
+              flat = [str(s[0] if isinstance(s, (list, tuple)) else s) for s in stmts]
+              if any(DANGER.search(x) for x in flat):
+                  SKIPPED.append('RunSQL in %s (destructive SQL skipped)' % app_label)
+                  return None
+              return _orig_runsql(self, app_label, schema_editor, from_state, to_state)
+
+          # database side only: Django's own state still follows the code, but the data stays in MySQL
+          ops.RemoveField.database_forwards = _skip_remove_field
+          ops.DeleteModel.database_forwards = _skip_delete_model
+          ops.RunSQL.database_forwards = _safe_runsql
+
+          try:
+              call_command('migrate', interactive=False, verbosity=1)
+          except BaseException as exc:
+              print('MIGRATE FAILED: %r' % (exc,))
+              sys.exit(1)
+
+          if SKIPPED:
+              print('=== SAFE MODE: destructive migration operations were SKIPPED (data untouched) ===')
+              for s in SKIPPED:
+                  print('  - ' + s)
+              subprocess.run(['bash', os.path.join(os.environ.get('HELPER_DIR', '.'), 'notify.sh'),
+                              'Migration SAFE MODE: drop skipped', '\n'.join(SKIPPED)[:900], 'shield'])
+          SMEOF
+
+      - name: Restore Database from Google Drive (safe - never starts an empty DB by accident)
         run: |
+          set -euo pipefail
+          fail() {
+            bash "$HELPER_DIR/notify.sh" "DEPLOY STOPPED: $1" "$2" "rotating_light"
+            echo "::error::$1 - $2"
+            exit 1
+          }
+
+          # 1) Drive must be readable. A listing ERROR is never treated as "first run".
+          OK=0
+          for i in 1 2 3 4; do
+            if rclone mkdir "$DRIVE_DIR" && rclone lsjson "$DRIVE_DIR" --files-only > "$HELPER_DIR/drive_list.json"; then
+              OK=1; break
+            fi
+            echo "Drive listing failed (try $i), retrying in 15s..."; sleep 15
+          done
+          [ "$OK" = "1" ] || fail "Google Drive not reachable" "rclone listing fail hui (token / quota / network). Khali DB nahi chalayi."
+          jq -e 'type == "array"' "$HELPER_DIR/drive_list.json" > /dev/null || fail "Drive listing invalid" "Drive ka jawab samajh nahi aaya. Khali DB nahi chalayi."
+
           if [ "$RESTORE_TARGET" = "list" ] || [ "$RESTORE_TARGET" = "ls" ]; then
             echo "=== AVAILABLE SNAPSHOTS ==="
-            rclone lsl "$DRIVE_DIR" --include "db_snapshot_*" || true
+            jq -r '.[] | select((.Name | startswith("db_snapshot_")) or (.Name | startswith("pre_migrate_"))) | "\(.ModTime)  \(.Size)  \(.Name)"' "$HELPER_DIR/drive_list.json" | sort
             echo "=== list done; continuing with LATEST ==="
             RESTORE_TARGET="latest"
           fi
 
           if [ "$RESTORE_TARGET" = "latest" ] || [ "$RESTORE_TARGET" = "r" ] || [ -z "$RESTORE_TARGET" ]; then
-            FILE=$(rclone lsjson "$DRIVE_DIR" --files-only --include "db_snapshot_*" \
-                   | jq -r 'sort_by(.ModTime) | .[-1].Name // empty')
+            FILE=$(jq -r '[.[] | select(.Name | startswith("db_snapshot_"))] | sort_by(.ModTime) | .[-1].Name // empty' "$HELPER_DIR/drive_list.json")
           else
             FILE="$RESTORE_TARGET"
+            jq -e --arg f "$FILE" 'any(.[]; .Name == $f)' "$HELPER_DIR/drive_list.json" > /dev/null \
+              || fail "Snapshot not found" "$FILE Drive par maujood nahi."
+          fi
+
+          # 2) BACKUP_SECRET_KEY must be the same key the snapshots were made with
+          MYFP=$(python "$HELPER_DIR/crypt.py" fp - -)
+          HAVE_FP=0
+          if jq -e 'any(.[]; .Name == "key_check.txt")' "$HELPER_DIR/drive_list.json" > /dev/null; then
+            HAVE_FP=1
+            rclone copyto "$DRIVE_DIR/key_check.txt" "$HELPER_DIR/key_check.txt"
+            [ "$(tr -d '[:space:]' < "$HELPER_DIR/key_check.txt")" = "$MYFP" ] \
+              || fail "BACKUP_SECRET_KEY changed" "Secret ki value pehle se alag hai (space/newline ya nayi key). Purani key wapas lagayein. Jaan boojh kar badli ho to Drive se key_check.txt delete karein."
           fi
 
           # --- license.key: Drive copy wins (it has the latest renewal); else bootstrap from secret LICENSE_KEY ---
           if rclone lsf "$DRIVE_DIR" --include "license.key.enc" | grep -q "license.key.enc"; then
-            rclone copyto "$DRIVE_DIR/license.key.enc" "$HELPER_DIR/license.key.enc" \
+            { rclone copyto "$DRIVE_DIR/license.key.enc" "$HELPER_DIR/license.key.enc" \
               && python "$HELPER_DIR/crypt.py" dec "$HELPER_DIR/license.key.enc" ./license.key \
-              && echo "License restored from Drive."
+              && echo "License restored from Drive."; } \
+              || bash "$HELPER_DIR/notify.sh" "license.key restore FAILED" "Drive se license restore nahi hui" "warning"
           elif [ -n "${LICENSE_KEY:-}" ]; then
             printf '%s' "$LICENSE_KEY" > ./license.key
             echo "License written from secret LICENSE_KEY."
           else
             echo "No license on Drive and no LICENSE_KEY secret (trial/read-only rules apply)."
           fi
-          [ -f license.key ] && sha256sum license.key | cut -d' ' -f1 > "$HELPER_DIR/license_hash"
+          if [ -f license.key ]; then sha256sum license.key | cut -d' ' -f1 > "$HELPER_DIR/license_hash"; fi
 
+          # 3) No snapshot: only an explicit manual "fresh_start = yes" may start an empty DB
           if [ -z "$FILE" ]; then
-            echo "No snapshot on Drive -> FIRST RUN, starting with a fresh empty database."
-            echo "0" > "$HELPER_DIR/restored_size"
-            echo "DB_READY=true" >> "$GITHUB_ENV"
-            exit 0
+            if [ "${FRESH_START:-}" = "yes" ]; then
+              echo "No snapshot on Drive and fresh_start=yes -> starting with a fresh empty database."
+              echo "0" > "$HELPER_DIR/restored_size"
+              if [ "$HAVE_FP" = "0" ]; then
+                echo "$MYFP" > "$HELPER_DIR/key_check.txt"
+                rclone copyto "$HELPER_DIR/key_check.txt" "$DRIVE_DIR/key_check.txt" || echo "key_check upload failed (not fatal)"
+              fi
+              echo "DB_READY=true" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            fail "No snapshot found on Drive" "Drive readable hai lekin koi db_snapshot_* nahi mila. Khali DB nahi chalayi. Sirf bilkul pehle run ke liye workflow ko manually chala kar fresh_start mein yes likhein."
           fi
 
           echo "Restoring snapshot: $FILE"
           rclone copyto "$DRIVE_DIR/$FILE" "./$FILE"
-          python "$HELPER_DIR/crypt.py" dec "./$FILE" "./restored.sql.gz"
+          python "$HELPER_DIR/crypt.py" dec "./$FILE" "./restored.sql.gz" \
+            || fail "Snapshot decrypt failed" "BACKUP_SECRET_KEY galat hai ya snapshot kharab hai."
+          gzip -t ./restored.sql.gz || fail "Snapshot corrupt" "$FILE ka gzip test fail hua."
           stat -c %s ./restored.sql.gz > "$HELPER_DIR/restored_size"
           gunzip -c ./restored.sql.gz > ./restored.sql
 
           MYSQL_PWD=root mysql -h 127.0.0.1 -P 3306 -u root -e "DROP DATABASE IF EXISTS local_django_db; CREATE DATABASE local_django_db CHARACTER SET utf8mb4;"
-          MYSQL_PWD=root mysql -h 127.0.0.1 -P 3306 -u root local_django_db < ./restored.sql
+          MYSQL_PWD=root mysql -h 127.0.0.1 -P 3306 -u root local_django_db < ./restored.sql \
+            || fail "Snapshot load failed" "$FILE MySQL mein load nahi hui."
           rm -f ./restored.sql ./restored.sql.gz "./$FILE"
 
           TABLES=$(MYSQL_PWD=root mysql -h 127.0.0.1 -P 3306 -u root -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='local_django_db';")
+          [ "$TABLES" -gt 0 ] || fail "Restore produced 0 tables" "$FILE load hui magar koi table nahi bana."
           echo "Restore OK: $TABLES tables loaded."
+
+          if [ "$HAVE_FP" = "0" ]; then
+            echo "$MYFP" > "$HELPER_DIR/key_check.txt"
+            rclone copyto "$HELPER_DIR/key_check.txt" "$DRIVE_DIR/key_check.txt" || echo "key_check upload failed (not fatal)"
+          fi
+          echo "RESTORED_FROM_SNAPSHOT=true" >> "$GITHUB_ENV"
           echo "DB_READY=true" >> "$GITHUB_ENV"
 
-      - name: Apply Migrations & Ensure Superuser
+      - name: Apply Migrations (SAFE MODE - no table/column is ever dropped) & Ensure Superuser
         run: |
+          # protected copy of the data right before any migration runs (kept: last 10)
+          if [ "${RESTORED_FROM_SNAPSHOT:-}" = "true" ]; then
+            bash "$HELPER_DIR/snapshot.sh" premigrate || echo "pre-migrate snapshot failed (continuing: the restored snapshot is still on Drive)"
+          fi
+
           python manage.py makemigrations --noinput || true
-          if python manage.py migrate --noinput; then
-            echo "Migrations applied."
+          if python "$HELPER_DIR/safe_migrate.py"; then
+            echo "Migrations applied (safe mode)."
           else
             echo "Migration conflict. Forcing state sync with --fake..."
-            python manage.py migrate --fake --noinput
+            bash "$HELPER_DIR/notify.sh" "Migration conflict (fake sync used)" "migrate fail hui, --fake se state sync kiya. Data safe hai." "warning"
+            if ! python manage.py migrate --fake --noinput; then
+              echo "DB_READY=false" >> "$GITHUB_ENV"
+              bash "$HELPER_DIR/notify.sh" "DEPLOY STOPPED: migration failed" "Server start nahi hua, snapshot overwrite nahi hui. Last good snapshot Drive par hai." "rotating_light"
+              exit 1
+            fi
           fi
 
           python manage.py shell -c "
@@ -420,6 +592,11 @@ jobs:
           BRANCH="${{ github.ref_name }}"
 
           for i in {1..65}; do
+            # GitHub kills a job at 6h: stop at 5h30m so the final snapshot always has time to finish
+            if [ $(( $(date +%s) - ${JOB_START:-$(date +%s)} )) -gt 19800 ]; then
+              echo "Time budget (5h30m) reached. Ending log stream -> final snapshot."
+              exit 0
+            fi
             for s in {1..60}; do
               LATEST_RUN_ID=$(gh api "repos/$REPO/actions/runs?branch=$BRANCH&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null || echo "$CURRENT_RUN_ID")
               if [ "$LATEST_RUN_ID" -gt "$CURRENT_RUN_ID" ]; then
@@ -445,3 +622,10 @@ jobs:
           pkill -f "snapshot.sh" || true
           sleep 3
           bash "$HELPER_DIR/snapshot.sh" final
+
+      - name: Alert if the workflow failed or was cancelled
+        if: ${{ failure() || cancelled() }}
+        run: |
+          curl -s -m 20 -H "Title: Workflow failed or cancelled" -H "Tags: rotating_light" -H "Priority: high" \
+            -d "Run $GITHUB_RUN_ID: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            ntfy.sh/hassan_shops_db || true
