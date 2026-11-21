@@ -591,6 +591,20 @@ jobs:
           REPO="${{ github.repository }}"
           BRANCH="${{ github.ref_name }}"
 
+          # Diagnosis: does the site work from OUTSIDE (runner -> Cloudflare -> tunnel -> Django)?
+          # (/manifest.json is used so the runner is not counted as a shop visitor)
+          diag() {
+            echo "--- PUBLIC URL SELF-CHECK ---"
+            curl -s -o /dev/null -m 20 -w "public (https://khanewalconnect.store) -> HTTP %{http_code} in %{time_total}s\n" "https://khanewalconnect.store/manifest.json" \
+              || echo "public URL check FAILED (curl exit $?)  <- tunnel / DNS / Cloudflare problem"
+            curl -s -o /dev/null -m 10 -w "local  (127.0.0.1:8000)              -> HTTP %{http_code} in %{time_total}s\n" "http://127.0.0.1:8000/manifest.json" \
+              || echo "local check FAILED (curl exit $?)  <- Django is not answering"
+            echo "--- CLOUDFLARED (tunnel.log: warnings/errors, last 15) ---"
+            grep -iE "ERR|WRN|error|retry|unable|lost|disconnect|reconnect" tunnel.log | tail -n 15 || echo "no tunnel warnings"
+          }
+          sleep 20
+          diag
+
           for i in {1..65}; do
             # GitHub kills a job at 6h: stop at 5h30m so the final snapshot always has time to finish
             if [ $(( $(date +%s) - ${JOB_START:-$(date +%s)} )) -gt 19800 ]; then
@@ -611,6 +625,7 @@ jobs:
             grep -E '"GET|POST|PUT|DELETE|HEAD' django.log | tail -n 50 || echo "No HTTP requests logged yet."
             echo "--- RECENT EXCEPTIONS / ERRORS ---"
             grep -i -C 3 "error\|exception\|traceback" django.log | tail -n 50 || echo "No errors detected."
+            diag
           done || true
 
       - name: Final Snapshot to Google Drive (stop server first)
