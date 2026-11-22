@@ -187,6 +187,7 @@ MIDDLEWARE = [
     'app.middleware.ShareholderRestrictionMiddleware',
     'app.security.security_2fa.TwoFactorMiddleware',
     'app.middleware.LiveVisitorMiddleware',
+    'app.middleware.ShopTrafficMiddleware',
     'app.middleware.AdminActivityMiddleware',
 ]
 

@@ -3,6 +3,7 @@ Project middleware.
 
     ShareholderRestrictionMiddleware  Keeps shareholder users inside /shareholder/.
     LiveVisitorMiddleware             Tracks shop visitors (throttled).
+    ShopTrafficMiddleware             Traffic Analytics page views.
     AdminActivityMiddleware           Tracks staff activity (throttled).
     SecurityMiddleware                IP access control and session timeout.
 
@@ -99,6 +100,34 @@ class LiveVisitorMiddleware:
                 except Exception:
                     logger.exception("Live visitor tracking failed.")
         return self.get_response(request)
+
+
+class ShopTrafficMiddleware:
+    """Traffic Analytics: counts shop page views (HTML GET pages only, bots/staff skipped)."""
+
+    SKIP = ("/shop/api/", "/shop/cart/count", "/shop/chat", "/shop/static", "/shop/ajax")
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        try:
+            path = request.path
+            if (
+                request.method == "GET"
+                and path.startswith("/shop/")
+                and not path.startswith(self.SKIP)
+                and response.status_code == 200
+                and "text/html" in response.get("Content-Type", "")
+                and request.headers.get("x-requested-with") != "XMLHttpRequest"
+            ):
+                from app.shop_traffic import log_page
+
+                log_page(request)
+        except Exception:
+            logger.exception("Shop traffic middleware failed")
+        return response
 
 
 class AdminActivityMiddleware:

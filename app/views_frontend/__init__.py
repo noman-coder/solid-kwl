@@ -7,6 +7,7 @@ from importlib import import_module as _im
 
 _MODULES = [
     "system.dashboard",
+    "system.traffic_analytics",
     "purchase.purchases",
     "purchase.vendor_reports",
     "purchase.vendors",

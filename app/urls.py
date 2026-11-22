@@ -245,6 +245,7 @@ urlpatterns = [
     path('vendors/approvals/bulk/', views_frontend.vendor_approvals_bulk, name='vendor_approvals_bulk'),
     path('vendors/approvals/account/<int:pk>/commission/', views_frontend.vendor_commission_update, name='vendor_commission_update'),
     path('vendors/banners/', views_frontend.shop_banner_list, name='shop_banner_list'),
+    path('traffic-analytics/', views_frontend.traffic_analytics, name='traffic_analytics'),
     path('vendors/banners/add/', views_frontend.shop_banner_form, name='shop_banner_create'),
     path('vendors/banners/<int:pk>/edit/', views_frontend.shop_banner_form, name='shop_banner_edit'),
     path('vendors/banners/<int:pk>/toggle/', views_frontend.shop_banner_toggle, name='shop_banner_toggle'),

@@ -1,0 +1,236 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Traffic Analytics{% endblock %}
+{% block page_title %}📈 Traffic Analytics{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ta-kpi { background:#fff; border-radius:14px; padding:14px 16px; box-shadow:0 2px 10px rgba(0,0,0,.06); height:100%; }
+  .ta-kpi .n { font-size:28px; font-weight:800; line-height:1.1; }
+  .ta-kpi .l { font-size:12px; color:#6b7280; text-transform:uppercase; letter-spacing:.4px; margin-top:4px; }
+  .ta-chg { font-size:12px; font-weight:700; }
+  .ta-up { color:#16a34a; } .ta-down { color:#dc2626; } .ta-flat { color:#6b7280; }
+  .ta-card { background:#fff; border-radius:16px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.06); margin-bottom:16px; }
+  .ta-card h6 { font-weight:800; margin-bottom:12px; }
+  .ta-table { font-size:14px; }
+  .ta-table th { font-size:11px; text-transform:uppercase; color:#6b7280; letter-spacing:.4px; white-space:nowrap; }
+  .ta-bar { height:10px; border-radius:6px; background:#e5e7eb; overflow:hidden; }
+  .ta-bar > span { display:block; height:100%; background:linear-gradient(90deg,#6366f1,#8b5cf6); }
+  .ta-funnel-row { margin-bottom:10px; }
+  .ta-live { display:inline-flex; align-items:center; gap:6px; background:#ecfdf5; color:#047857; font-weight:700;
+             border-radius:20px; padding:4px 12px; font-size:13px; }
+  .ta-live i { width:9px; height:9px; border-radius:50%; background:#10b981; display:inline-block; }
+  .ta-pill { display:inline-block; background:#eef2ff; color:#4338ca; font-weight:700; font-size:12px; border-radius:10px; padding:2px 8px; }
+  .ta-pill.red { background:#fee2e2; color:#b91c1c; } .ta-pill.green { background:#dcfce7; color:#15803d; }
+  .ta-scroll { overflow-x:auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div class="btn-group" role="group">
+      {% for d, label in periods.items %}
+        <a href="?days={{ d }}" class="btn btn-sm {% if d == days %}btn-primary{% else %}btn-outline-primary{% endif %}">{{ label }}</a>
+      {% endfor %}
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="ta-live"><i></i> {{ live_now }} abhi online</span>
+      <small class="text-muted">{{ start|date:"d M Y" }}{% if days > 1 %} → {{ end|date:"d M Y" }}{% endif %}</small>
+    </div>
+  </div>
+
+  {% if not tracking_since %}
+  <div class="alert alert-info">Tracking abhi shuru hui hai. Jaise hi shop par visitors aayenge, yahan numbers nazar aane lagenge.</div>
+  {% endif %}
+
+  <!-- KPIs -->
+  <div class="row g-3 mb-3">
+    {% for k in kpis %}
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="ta-kpi">
+        <div class="n">{{ k.icon }} {{ k.value }}</div>
+        <div class="l">{{ k.label }}</div>
+        <div class="ta-chg {% if k.change is None %}ta-flat{% elif k.change > 0 %}ta-up{% elif k.change < 0 %}ta-down{% else %}ta-flat{% endif %}">
+          {% if k.change is None %}—{% elif k.change > 0 %}▲ {{ k.change }}%{% elif k.change < 0 %}▼ {{ k.change }}%{% else %}0%{% endif %}
+          <span class="text-muted fw-normal">pichle {% if days == 1 %}din{% else %}{{ days }} din{% endif %} se</span>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="row">
+    <div class="col-lg-8">
+      <div class="ta-card">
+        <h6>Daily Views &amp; Visitors</h6>
+        <canvas id="taDaily" height="110"></canvas>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="ta-card">
+        <h6>Funnel: dekha → cart → order</h6>
+        {% for f in funnel %}
+        <div class="ta-funnel-row">
+          <div class="d-flex justify-content-between small"><span>{{ f.label }}</span><strong>{{ f.n }}</strong></div>
+          <div class="ta-bar"><span style="width:{{ f.pct }}%"></span></div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-7">
+      <div class="ta-card">
+        <h6>🛍️ Sab se zyada dekhe gaye products</h6>
+        <div class="ta-scroll">
+        <table class="table table-sm ta-table align-middle mb-0">
+          <thead><tr><th>#</th><th>Product</th><th class="text-end">Views</th><th class="text-end">Visitors</th>
+            <th class="text-end">Cart</th><th class="text-end">Orders</th><th class="text-end">Conv.</th></tr></thead>
+          <tbody>
+          {% for p in top_viewed %}
+            <tr><td>{{ forloop.counter }}</td><td>{{ p.name }}</td><td class="text-end fw-bold">{{ p.views }}</td>
+              <td class="text-end">{{ p.viewers }}</td><td class="text-end">{{ p.carts }}</td>
+              <td class="text-end">{{ p.orders }}</td>
+              <td class="text-end">{% if p.conv is None %}—{% else %}{{ p.conv }}%{% endif %}</td></tr>
+          {% empty %}
+            <tr><td colspan="7" class="text-center text-muted py-3">Is muddat mein koi product view nahi hua.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="ta-card">
+        <h6>👀 Dekha bohat, kharida nahi</h6>
+        <p class="small text-muted mb-2">Kam az kam 3 views, magar 0 orders: price, photo ya stock check karein.</p>
+        <table class="table table-sm ta-table mb-0">
+          <tbody>
+          {% for p in viewed_not_bought %}
+            <tr><td>{{ p.name }}</td><td class="text-end"><span class="ta-pill">{{ p.views }} views</span>
+              {% if p.carts %}<span class="ta-pill green">{{ p.carts }} cart</span>{% endif %}</td></tr>
+          {% empty %}
+            <tr><td class="text-muted text-center py-3">Abhi koi nahi.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-4">
+      <div class="ta-card">
+        <h6>🔎 Top Searches</h6>
+        <table class="table table-sm ta-table mb-0">
+          <thead><tr><th>Keyword</th><th class="text-end">Searches</th><th class="text-end">Mila?</th></tr></thead>
+          <tbody>
+          {% for s in top_searches %}
+            <tr><td>{{ s.shown|default:s.keyword_norm }}</td><td class="text-end fw-bold">{{ s.n }}</td>
+              <td class="text-end">{% if s.found %}<span class="ta-pill green">{{ s.found }}</span>{% else %}<span class="ta-pill red">0</span>{% endif %}</td></tr>
+          {% empty %}
+            <tr><td colspan="3" class="text-center text-muted py-3">Koi search nahi hui.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="ta-card">
+        <h6>❌ Not Found (0 results)</h6>
+        <p class="small text-muted mb-2">Customers ye maang rahe hain magar shop mein nahi mila: naye products ka idea.</p>
+        <table class="table table-sm ta-table mb-0">
+          <thead><tr><th>Keyword</th><th class="text-end">Baar</th></tr></thead>
+          <tbody>
+          {% for s in not_found %}
+            <tr><td>{{ s.shown|default:s.keyword_norm }}</td><td class="text-end"><span class="ta-pill red">{{ s.zero }}</span></td></tr>
+          {% empty %}
+            <tr><td colspan="2" class="text-center text-muted py-3">Sab searches ka result mila.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="ta-card">
+        <h6>🔥 Trending Searches</h6>
+        {% if days == 1 %}
+          <p class="small text-muted mb-0">Trending dekhne ke liye 7, 30 ya 90 din select karein.</p>
+        {% else %}
+        <table class="table table-sm ta-table mb-0">
+          <thead><tr><th>Keyword</th><th class="text-end">Ab</th><th class="text-end">Pehle</th></tr></thead>
+          <tbody>
+          {% for t in trending %}
+            <tr><td>{{ t.kw }} {% if t.new %}<span class="ta-pill green">new</span>{% endif %}</td>
+              <td class="text-end fw-bold">{{ t.now }}</td><td class="text-end text-muted">{{ t.before }}</td></tr>
+          {% empty %}
+            <tr><td colspan="3" class="text-center text-muted py-3">Abhi koi khaas rujhan nahi.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="ta-card">
+        <h6>🕒 Peak Hours{% if peak_hour is not None %} <small class="text-muted fw-normal">(sab se zyada: {{ peak_hour }}:00)</small>{% endif %}</h6>
+        <canvas id="taHours" height="110"></canvas>
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="ta-card">
+        <h6>📱 Device</h6>
+        {% for d in devices %}<div class="d-flex justify-content-between small mb-1"><span>{{ d.name }}</span><strong>{{ d.n }}</strong></div>
+        {% empty %}<span class="text-muted small">—</span>{% endfor %}
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="ta-card">
+        <h6>🌐 Traffic Source</h6>
+        {% for s in sources %}<div class="d-flex justify-content-between small mb-1"><span>{{ s.name }}</span><strong>{{ s.n }}</strong></div>
+        {% empty %}<span class="text-muted small">—</span>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <p class="text-muted small mb-0">
+    Raw data 90 din tak rehta hai, us ke baad daily summary mein save ho jata hai (summary kabhi delete nahi hoti).
+    Bots aur staff ke views count nahi hote.{% if tracking_since %} Tracking shuru: {{ tracking_since|date:"d M Y" }}.{% endif %}
+  </p>
+</div>
+
+{{ chart_labels|json_script:"ta-labels" }}
+{{ chart_views|json_script:"ta-views" }}
+{{ chart_visitors|json_script:"ta-visitors" }}
+{{ hour_data|json_script:"ta-hours" }}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  if (typeof Chart === 'undefined') return;
+  var j = function (id) { return JSON.parse(document.getElementById(id).textContent); };
+  new Chart(document.getElementById('taDaily'), {
+    type: 'bar',
+    data: { labels: j('ta-labels'), datasets: [
+      { label: 'Views', data: j('ta-views'), backgroundColor: '#6366f1' },
+      { label: 'Visitors', data: j('ta-visitors'), backgroundColor: '#10b981' } ] },
+    options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  });
+  var hrs = []; for (var i = 0; i < 24; i++) hrs.push(i + ':00');
+  new Chart(document.getElementById('taHours'), {
+    type: 'bar',
+    data: { labels: hrs, datasets: [{ label: 'Views', data: j('ta-hours'), backgroundColor: '#f59e0b' }] },
+    options: { responsive: true, plugins: { legend: { display: false } },
+               scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  });
+})();
+</script>
+{% endblock %}

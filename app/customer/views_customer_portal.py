@@ -809,6 +809,10 @@ def shop_home(request):
     paginator = Paginator(products, 24)
     page = request.GET.get('page', 1)
     page_obj = paginator.get_page(page)
+
+    if original_search and str(page) in ('1', ''):
+        from app.shop_traffic import log_search
+        log_search(request, original_search, paginator.count, typo_corrected or '')
     
     product_ids = [p.id for p in page_obj]
     
@@ -974,6 +978,8 @@ def product_detail(request, pk):
         RecentlyViewed.track_view(request, product)
     except Exception as e:
         logger.error(f"Track view error: {e}")
+    from app.shop_traffic import log_product_view
+    log_product_view(request, product)
     
     total_stock = Inventory.objects.filter(product=product).aggregate(
         total=Sum('stock')
@@ -1128,6 +1134,9 @@ def buy_now(request, product_id):
         request.session['buy_now_product_id'] = product.id
         request.session.modified = True
         request.session.save()
+
+        from app.shop_traffic import log_cart_add
+        log_cart_add(request, product, qty)
         
         if request.user.is_authenticated and hasattr(request.user, 'customer_profile'):
             return redirect('checkout')
@@ -1234,6 +1243,9 @@ def add_to_cart(request):
         request.session.modified = True
         
         cart_count = sum(item['quantity'] for item in cart.values())
+
+        from app.shop_traffic import log_cart_add
+        log_cart_add(request, product, quantity)
         
         return JsonResponse({
             'success': True,
