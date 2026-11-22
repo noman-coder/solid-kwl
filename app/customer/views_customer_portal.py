@@ -157,6 +157,12 @@ def extract_city_from_address(address):
 AREA_SESSION_KEY = 'delivery_area'
 
 
+def _alias_product_ids(text):
+    """Admin ne (Traffic Analytics se) jo alias lagaye, un se mile products ki ids (subquery, join nahi)."""
+    from app.models import ProductAlias
+    return ProductAlias.objects.filter(alias__icontains=text).values('product_id')
+
+
 def get_delivery_area(request):
     """
     Customer ka "Deliver to" location.
@@ -746,7 +752,8 @@ def shop_home(request):
             Q(barcode__icontains=search) |
             Q(description__icontains=search) |
             Q(category__name__icontains=search) |
-            Q(brand__name__icontains=search)
+            Q(brand__name__icontains=search) |
+            Q(id__in=_alias_product_ids(search))
         )
         
         if not products.exists() and len(search) >= 3:

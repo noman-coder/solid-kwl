@@ -991,6 +991,7 @@ def product_create(request):
         'brands': Brand.objects.all(),
         'locations': Location.objects.all(),
         'types': Types.objects.all(),
+        'prefill_name': (request.GET.get('name') or '').strip()[:200],
     }
     return render(request, 'products/create.html', context)
 

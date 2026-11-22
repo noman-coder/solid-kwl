@@ -102,6 +102,11 @@ BREVO_SENDER_EMAIL = _env_first('BREVO_SENDER_EMAIL', 'SENDER_EMAIL', 'EMAIL_SEN
 # .env mein: ORDER_ALERT_EMAILS=owner@example.com,manager@example.com
 ORDER_ALERT_EMAILS = [e.strip() for e in os.environ.get('ORDER_ALERT_EMAILS', '').split(',') if e.strip()]
 
+# Traffic Analytics daily summary email: receiver GitHub secret SUMMERY_REC (comma se alag kar ke kai address bhi chalte hain)
+TRAFFIC_SUMMARY_RECIPIENTS = [
+    e.strip() for e in (os.environ.get('SUMMERY_REC') or os.environ.get('SUMMARY_REC') or '').split(',') if e.strip()
+]
+
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp-relay.brevo.com')
 EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 't')

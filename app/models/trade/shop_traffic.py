@@ -31,6 +31,7 @@ class ShopTrafficEvent(models.Model):
     path = models.CharField(max_length=255, blank=True, default='')
     device = models.CharField(max_length=10, blank=True, default='')
     source = models.CharField(max_length=30, blank=True, default='direct')
+    area = models.CharField(max_length=100, blank=True, default='', help_text='Customer ka "Deliver to" shehar/area')
 
     class Meta:
         verbose_name = 'Shop Traffic Event'
@@ -71,7 +72,8 @@ class ShopTrafficDaily(models.Model):
     SITE = 'site'
     PRODUCT = 'product'
     SEARCH = 'search'
-    KINDS = [(SITE, 'Site'), (PRODUCT, 'Product'), (SEARCH, 'Search')]
+    AREA = 'area'
+    KINDS = [(SITE, 'Site'), (PRODUCT, 'Product'), (SEARCH, 'Search'), (AREA, 'Area')]
 
     day = models.DateField(db_index=True)
     kind = models.CharField(max_length=10, choices=KINDS)
@@ -92,3 +94,41 @@ class ShopTrafficDaily(models.Model):
 
     def __str__(self):
         return f"{self.day} {self.kind} {self.label}"
+
+
+class ShopKeywordAction(models.Model):
+    """Admin ne "Not Found" keyword ka kya kiya: alias laga diya ya ignore kar diya."""
+    ALIAS = 'alias'
+    IGNORED = 'ignored'
+    ACTIONS = [(ALIAS, 'Alias added'), (IGNORED, 'Ignored')]
+
+    keyword_norm = models.CharField(max_length=100, unique=True)
+    action = models.CharField(max_length=10, choices=ACTIONS)
+    product = models.ForeignKey(
+        'Product', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Shop Keyword Action'
+        verbose_name_plural = 'Shop Keyword Actions'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.keyword_norm} -> {self.action}"
+
+
+class ShopTrafficMailLog(models.Model):
+    """Daily summary email: har din ki sirf aik entry, taake email do baar na jaye."""
+    day = models.DateField(unique=True, help_text='Jis din ki summary hai')
+    sent_at = models.DateTimeField(auto_now_add=True)
+    recipients = models.CharField(max_length=500, blank=True, default='')
+
+    class Meta:
+        verbose_name = 'Shop Traffic Mail Log'
+        verbose_name_plural = 'Shop Traffic Mail Logs'
+        ordering = ['-day']
+
+    def __str__(self):
+        return f"{self.day} sent {self.sent_at:%H:%M}"

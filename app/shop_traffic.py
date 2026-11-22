@@ -67,6 +67,15 @@ def _session_key(request):
     return request.session.session_key or ''
 
 
+def _area(request):
+    """Customer ka "Deliver to" shehar/area (session ya login customer ka address). Na mile to ''."""
+    try:
+        from .customer.views_customer_portal import get_delivery_area
+        return (get_delivery_area(request) or '')[:100]
+    except Exception:
+        return ''
+
+
 def _once(key, seconds):
     try:
         return cache.add(key, 1, seconds)
@@ -95,7 +104,8 @@ def log_page(request):
         day, hour = _local_now()
         ShopTrafficEvent.objects.create(
             event_type='page', day=day, hour=hour, session_key=sk, path=path,
-            device=_device(request), source=_source(request))
+            device=_device(request), source=_source(request), area=_area(request))
+        maybe_send_daily_summary()
     except Exception:
         logger.exception("Traffic page tracking failed")
 
@@ -111,7 +121,8 @@ def log_product_view(request, product):
         day, hour = _local_now()
         ShopTrafficEvent.objects.create(
             event_type='product', day=day, hour=hour, session_key=sk, product=product,
-            product_name=(product.name or '')[:200], path=request.path[:255], device=_device(request))
+            product_name=(product.name or '')[:200], path=request.path[:255], device=_device(request),
+            area=_area(request))
     except Exception:
         logger.exception("Traffic product tracking failed")
 
@@ -126,7 +137,7 @@ def log_cart_add(request, product, quantity=1):
         ShopTrafficEvent.objects.create(
             event_type='cart_add', day=day, hour=hour, session_key=sk, product=product,
             product_name=(product.name or '')[:200], quantity=max(int(quantity or 1), 1),
-            path=request.path[:255], device=_device(request))
+            path=request.path[:255], device=_device(request), area=_area(request))
     except Exception:
         logger.exception("Traffic cart tracking failed")
 
@@ -193,6 +204,13 @@ def rollup_old_traffic(keep_days=90, max_days=10, dry_run=False):
                 rows.append(ShopTrafficDaily(
                     day=day, kind='product', label=(r['name'] or '')[:200], product_id=r['product_id'],
                     views=r['views'], visitors=r['visitors'], cart_adds=r['carts']))
+            for r in ev.values('area').annotate(
+                    v=Count('id', filter=Q(event_type='product')),
+                    u=Count('session_key', distinct=True, filter=Q(event_type='page')),
+                    c=Count('id', filter=Q(event_type='cart_add'))):
+                rows.append(ShopTrafficDaily(
+                    day=day, kind='area', label=((r['area'] or '').strip() or 'unknown')[:200],
+                    views=r['v'], visitors=r['u'], cart_adds=r['c']))
             for r in sr.values('keyword_norm').annotate(
                     n=Count('id'), zero=Count('id', filter=Q(results_count=0)),
                     users=Count('session_key', distinct=True)):
@@ -204,3 +222,116 @@ def rollup_old_traffic(keep_days=90, max_days=10, dry_run=False):
             sr.delete()
         done.append((day, n_ev, n_sr))
     return done
+
+
+# ---------------------------------------------------------------------------
+# Daily summary email (receiver: secret SUMMERY_REC -> settings.TRAFFIC_SUMMARY_RECIPIENTS)
+# ---------------------------------------------------------------------------
+
+SUMMARY_HOUR = 8          # raat ke baad, subah 8 baje ke baad pehle visitor par kal ki summary jati hai
+
+
+def summary_recipients():
+    from django.conf import settings
+    return [e for e in (getattr(settings, 'TRAFFIC_SUMMARY_RECIPIENTS', None) or []) if '@' in e]
+
+
+def build_summary_email(day):
+    """(subject, text, html) for one day."""
+    from html import escape
+
+    from .traffic_reports import collect
+    d = collect(day, day, limit=5)
+    title = f"Shop Traffic Summary: {day:%d %b %Y}"
+
+    def arrow(c):
+        return '' if c is None else (f" (▲{c}%)" if c > 0 else (f" (▼{abs(c)}%)" if c < 0 else ''))
+
+    lines = [title, '']
+    for k in d['kpis']:
+        lines.append(f"{k['label']}: {k['value']}{arrow(k['change'])}")
+    sections = [
+        ('Top products', [f"{p['name']}: {p['views']} views, {p['carts']} cart, {p['orders']} orders" for p in d['top_viewed']]),
+        ('Top searches', [f"{r['shown'] or r['keyword_norm']}: {r['n']}" for r in d['top_searches']]),
+        ('Not found (customers maang rahe, shop mein nahi)', [f"{r['shown'] or r['keyword_norm']}: {r['zero']}" for r in d['not_found']]),
+        ('Top areas', [f"{a['name']}: {a['visitors']} visitors, {a['orders']} orders" for a in d['areas'][:5]]),
+    ]
+    for head, items in sections:
+        lines += ['', head + ':'] + (['  ' + i for i in items] or ['  -'])
+    text = '\n'.join(lines)
+
+    kp = ''.join(
+        f"<td style='padding:10px 12px;text-align:center'><div style='font-size:22px;font-weight:800'>{k['value']}</div>"
+        f"<div style='font-size:11px;color:#6b7280;text-transform:uppercase'>{escape(k['label'])}</div>"
+        f"<div style='font-size:11px;color:{'#16a34a' if (k['change'] or 0) >= 0 else '#dc2626'}'>{escape(arrow(k['change']))}</div></td>"
+        for k in d['kpis'])
+    blocks = ''
+    for head, items in sections:
+        li = ''.join(f"<li style='margin:2px 0'>{escape(i)}</li>" for i in items) or "<li style='color:#9ca3af'>-</li>"
+        blocks += f"<h3 style='font-size:14px;margin:18px 0 6px'>{escape(head)}</h3><ul style='margin:0;padding-left:18px;font-size:13px'>{li}</ul>"
+    html = (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden'>"
+        f"<div style='background:#4f46e5;color:#fff;padding:16px 20px'><div style='font-size:18px;font-weight:800'>📈 {escape(title)}</div></div>"
+        f"<div style='padding:16px 20px'><table style='width:100%;border-collapse:collapse;background:#f9fafb'>"
+        f"<tr>{kp}</tr></table>{blocks}"
+        "<p style='font-size:11px;color:#9ca3af;margin-top:20px'>Admin → People → Traffic Analytics mein poori detail.</p></div></div>")
+    return title, text, html
+
+
+def send_daily_summary(day, to=None):
+    """Email bhejo. Returns True agar bhej di gayi."""
+    from django.conf import settings
+    from django.core.mail import EmailMultiAlternatives
+
+    to = to or summary_recipients()
+    if not to:
+        return False
+    subject, text, html = build_summary_email(day)
+    msg = EmailMultiAlternatives(f"📈 {subject}", text, getattr(settings, 'DEFAULT_FROM_EMAIL', None), to)
+    msg.attach_alternative(html, 'text/html')
+    msg.send(fail_silently=False)
+    return True
+
+
+def maybe_send_daily_summary():
+    """Subah SUMMARY_HOUR ke baad din mein sirf aik baar kal ki summary bhejta hai (visitor ki request se
+    shuru, background thread mein). DB marker (ShopTrafficMailLog) se email dobara nahi jati."""
+    import threading
+    from datetime import timedelta
+
+    from django.db import IntegrityError, connections
+
+    try:
+        if not summary_recipients():
+            return
+        local = timezone.localtime(timezone.now())
+        if local.hour < SUMMARY_HOUR:
+            return
+        if not _once('trf_mail_check', 600):              # database ko baar baar na chhere
+            return
+        yesterday = local.date() - timedelta(days=1)
+        from .models import ShopTrafficMailLog
+        if ShopTrafficMailLog.objects.filter(day=yesterday).exists():
+            return
+        try:
+            claim = ShopTrafficMailLog.objects.create(day=yesterday, recipients=','.join(summary_recipients())[:500])
+        except IntegrityError:                            # kisi aur worker ne pehle claim kar liya
+            return
+
+        def _run():
+            try:
+                if not send_daily_summary(yesterday):
+                    claim.delete()
+            except Exception:
+                logger.exception("Daily traffic summary email failed")
+                try:
+                    claim.delete()                        # agle chance par dobara koshish
+                    cache.set('trf_mail_check', 1, 1800)  # 30 min ruk kar
+                except Exception:
+                    pass
+            finally:
+                connections.close_all()                   # is thread ka apna DB connection band
+
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        logger.exception("Daily traffic summary check failed")

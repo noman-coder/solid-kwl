@@ -36,7 +36,15 @@
         <a href="?days={{ d }}" class="btn btn-sm {% if d == days %}btn-primary{% else %}btn-outline-primary{% endif %}">{{ label }}</a>
       {% endfor %}
     </div>
-    <div class="d-flex align-items-center gap-2">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div class="btn-group btn-group-sm">
+        <a href="{% url 'traffic_export' %}?days={{ days }}" class="btn btn-success">⬇️ Excel</a>
+        <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false"><span class="visually-hidden">CSV</span></button>
+        <ul class="dropdown-menu">
+          {% for t in csv_tables %}<li><a class="dropdown-item" href="{% url 'traffic_export' %}?days={{ days }}&format=csv&table={{ t }}">CSV: {{ t }}</a></li>{% endfor %}
+        </ul>
+      </div>
+      {% if mail_configured %}<button type="button" class="btn btn-sm btn-outline-secondary" id="taMailBtn">✉️ Kal ki summary email karo</button>{% endif %}
       <span class="ta-live"><i></i> {{ live_now }} abhi online</span>
       <small class="text-muted">{{ start|date:"d M Y" }}{% if days > 1 %} → {{ end|date:"d M Y" }}{% endif %}</small>
     </div>
@@ -144,15 +152,25 @@
         <h6>❌ Not Found (0 results)</h6>
         <p class="small text-muted mb-2">Customers ye maang rahe hain magar shop mein nahi mila: naye products ka idea.</p>
         <table class="table table-sm ta-table mb-0">
-          <thead><tr><th>Keyword</th><th class="text-end">Baar</th></tr></thead>
+          <thead><tr><th>Keyword</th><th class="text-end">Baar</th>{% if can_manage %}<th></th>{% endif %}</tr></thead>
           <tbody>
           {% for s in not_found %}
-            <tr><td>{{ s.shown|default:s.keyword_norm }}</td><td class="text-end"><span class="ta-pill red">{{ s.zero }}</span></td></tr>
+            <tr><td>{{ s.shown|default:s.keyword_norm }}</td><td class="text-end"><span class="ta-pill red">{{ s.zero }}</span></td>
+              {% if can_manage %}<td class="text-end text-nowrap">
+                <button type="button" class="btn btn-sm btn-outline-primary py-0 ta-act" data-kw="{{ s.keyword_norm }}" data-shown="{{ s.shown|default:s.keyword_norm }}">Action</button>
+              </td>{% endif %}</tr>
           {% empty %}
-            <tr><td colspan="2" class="text-center text-muted py-3">Sab searches ka result mila.</td></tr>
+            <tr><td colspan="3" class="text-center text-muted py-3">Sab searches ka result mila.</td></tr>
           {% endfor %}
           </tbody>
         </table>
+        {% if handled_rows %}
+        <div class="small text-muted mt-3 mb-1">Pehle se handle:</div>
+        {% for h in handled_rows %}
+          <div class="small">{{ h.kw }} →
+            {% if h.action.action == 'alias' %}<span class="ta-pill green">alias: {{ h.action.product.name|default:"(product hata diya gaya)" }}</span>{% else %}<span class="ta-pill">ignored</span>{% endif %}</div>
+        {% endfor %}
+        {% endif %}
       </div>
     </div>
     <div class="col-lg-4">
@@ -200,11 +218,54 @@
     </div>
   </div>
 
+  <div class="ta-card">
+    <h6>📍 Area-wise Traffic</h6>
+    <p class="small text-muted mb-2">Customer ne shop par jo "Deliver to" area chuna (ya login customer ka default shehar). Orders shipping city se aate hain.</p>
+    <div class="ta-scroll">
+    <table class="table table-sm ta-table align-middle mb-0">
+      <thead><tr><th>Area</th><th class="text-end">Visitors</th><th class="text-end">Product views</th>
+        <th class="text-end">Cart</th><th class="text-end">Orders</th><th class="text-end">Order value</th><th class="text-end">Conv.</th></tr></thead>
+      <tbody>
+      {% for a in areas %}
+        <tr><td>{{ a.name }}</td><td class="text-end fw-bold">{{ a.visitors }}</td><td class="text-end">{{ a.product_views }}</td>
+          <td class="text-end">{{ a.cart_adds }}</td><td class="text-end">{{ a.orders }}</td>
+          <td class="text-end">Rs. {{ a.order_value }}</td>
+          <td class="text-end">{% if a.conv is None %}—{% else %}{{ a.conv }}%{% endif %}</td></tr>
+      {% empty %}
+        <tr><td colspan="7" class="text-center text-muted py-3">Abhi area ka data nahi.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+
   <p class="text-muted small mb-0">
     Raw data 90 din tak rehta hai, us ke baad daily summary mein save ho jata hai (summary kabhi delete nahi hoti).
     Bots aur staff ke views count nahi hote.{% if tracking_since %} Tracking shuru: {{ tracking_since|date:"d M Y" }}.{% endif %}
   </p>
 </div>
+
+{% if can_manage %}
+<div class="modal fade" id="taModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">❌ "<span id="taKw"></span>" ka kya karna hai?</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="fw-bold small mb-1">1) Maujooda product se jodein (alias)</div>
+        <input type="text" id="taProdQ" class="form-control" placeholder="Product ka naam ya code likhein..." autocomplete="off">
+        <div id="taProdList" class="list-group mt-2"></div>
+        <hr>
+        <div class="d-flex flex-wrap gap-2">
+          <a id="taNewProd" href="#" class="btn btn-sm btn-primary" target="_blank">➕ Naya product banao</a>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="taIgnore">Ignore (kaam ki search nahi)</button>
+        </div>
+        <div id="taMsg" class="small mt-3"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {{ chart_labels|json_script:"ta-labels" }}
 {{ chart_views|json_script:"ta-views" }}
@@ -215,17 +276,75 @@
 {% block extra_js %}
 <script>
 (function () {
-  if (typeof Chart === 'undefined') return;
+  var hasChart = typeof Chart !== 'undefined';
   var j = function (id) { return JSON.parse(document.getElementById(id).textContent); };
-  new Chart(document.getElementById('taDaily'), {
+  if (hasChart) new Chart(document.getElementById('taDaily'), {
     type: 'bar',
     data: { labels: j('ta-labels'), datasets: [
       { label: 'Views', data: j('ta-views'), backgroundColor: '#6366f1' },
       { label: 'Visitors', data: j('ta-visitors'), backgroundColor: '#10b981' } ] },
     options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
+  var csrf = '{{ csrf_token }}';
+  var post = function (url, body) {
+    return fetch(url, { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf }, body: JSON.stringify(body || {}) })
+      .then(function (r) { return r.json(); });
+  };
+
+  var mail = document.getElementById('taMailBtn');
+  if (mail) mail.addEventListener('click', function () {
+    mail.disabled = true;
+    post("{% url 'traffic_send_summary' %}").then(function (j) { alert(j.message); })
+      .catch(function () { alert('Email nahi gayi'); }).then(function () { mail.disabled = false; });
+  });
+
+  var modalEl = document.getElementById('taModal');
+  if (modalEl) {
+    var modal = new bootstrap.Modal(modalEl), kw = '', timer = null;
+    var q = document.getElementById('taProdQ'), list = document.getElementById('taProdList'),
+        msg = document.getElementById('taMsg');
+    document.querySelectorAll('.ta-act').forEach(function (b) {
+      b.addEventListener('click', function () {
+        kw = b.dataset.kw;
+        document.getElementById('taKw').textContent = b.dataset.shown;
+        document.getElementById('taNewProd').href = "{% url 'product_create' %}?name=" + encodeURIComponent(b.dataset.shown);
+        q.value = ''; list.innerHTML = ''; msg.textContent = '';
+        modal.show();
+      });
+    });
+    var done = function (j) {
+      msg.className = 'small mt-3 ' + (j.success ? 'text-success' : 'text-danger');
+      msg.textContent = j.message;
+      if (j.success) setTimeout(function () { location.reload(); }, 1200);
+    };
+    q.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        if (q.value.trim().length < 2) { list.innerHTML = ''; return; }
+        fetch("{% url 'traffic_product_search' %}?q=" + encodeURIComponent(q.value.trim()), { credentials: 'same-origin' })
+          .then(function (r) { return r.json(); }).then(function (j) {
+            list.innerHTML = '';
+            (j.results || []).forEach(function (p) {
+              var a = document.createElement('button');
+              a.type = 'button'; a.className = 'list-group-item list-group-item-action small';
+              a.textContent = p.name + (p.sku ? '  (' + p.sku + ')' : '');
+              a.addEventListener('click', function () {
+                post("{% url 'traffic_keyword_action' %}", { keyword: kw, action: 'alias', product_id: p.id }).then(done);
+              });
+              list.appendChild(a);
+            });
+            if (!list.children.length) list.innerHTML = '<div class="small text-muted">Koi product nahi mila</div>';
+          });
+      }, 300);
+    });
+    document.getElementById('taIgnore').addEventListener('click', function () {
+      post("{% url 'traffic_keyword_action' %}", { keyword: kw, action: 'ignore' }).then(done);
+    });
+  }
+
   var hrs = []; for (var i = 0; i < 24; i++) hrs.push(i + ':00');
-  new Chart(document.getElementById('taHours'), {
+  if (hasChart) new Chart(document.getElementById('taHours'), {
     type: 'bar',
     data: { labels: hrs, datasets: [{ label: 'Views', data: j('ta-hours'), backgroundColor: '#f59e0b' }] },
     options: { responsive: true, plugins: { legend: { display: false } },

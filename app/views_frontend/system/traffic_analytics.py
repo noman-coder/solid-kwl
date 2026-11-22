@@ -1,56 +1,45 @@
 """Frontend views: system/traffic_analytics
 
-Admin "Traffic Analytics" dashboard (shop): views, visitors, product views, searches,
-cart/order conversion. Sirf padhta hai (read-only), koi data change nahi karta.
-Permission: view_analytics.
+Admin "Traffic Analytics" dashboard (shop): views, visitors, product views, searches, area-wise traffic,
+cart/order conversion, "Not Found" keyword actions, Excel/CSV export, daily summary email.
+
+Dashboard sirf padhta hai. Data badalne wale sirf 2 kaam hain (alias lagana / ignore karna) aur wo bhi
+sirf naye ShopKeywordAction table aur ProductAlias mein ENTRY ADD karte hain: kuch delete nahi hota.
+Permissions: dekhna = view_analytics, alias/ignore = manage_products.
 """
-from datetime import datetime, time, timedelta
+import csv
+import json
+from datetime import timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Q
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from ...models import (
-    CompanyInfo, CustomerOrder, CustomerOrderItem, LiveVisitor, ShopSearchLog, ShopTrafficEvent,
+    CompanyInfo, LiveVisitor, Product, ProductAlias, ShopKeywordAction, ShopSearchLog, ShopTrafficEvent,
 )
 from ...security.permissions import perm_required
-from ...shop_traffic import rollup_old_traffic
+from ...shop_traffic import (
+    normalize_keyword, rollup_old_traffic, send_daily_summary, summary_recipients,
+)
+from ...traffic_reports import CSV_TABLES, build_xlsx, collect, table_rows
 
 PERIODS = {1: 'Aaj', 7: '7 din', 30: '30 din', 90: '90 din'}
-SOURCE_LABELS = {
-    'direct': 'Direct', 'facebook': 'Facebook', 'instagram': 'Instagram', 'whatsapp': 'WhatsApp',
-    'google': 'Google', 'tiktok': 'TikTok', 'youtube': 'YouTube', 'other': 'Other',
-}
 
 
-def _pct_change(cur, prev):
-    if not prev:
-        return None if not cur else 100.0
-    return round((cur - prev) * 100.0 / prev, 1)
-
-
-def _bounds(start, end):
-    tz = timezone.get_current_timezone()
-    s = timezone.make_aware(datetime.combine(start, time.min), tz)
-    e = timezone.make_aware(datetime.combine(end + timedelta(days=1), time.min), tz)
-    return s, e
-
-
-def _kpis(start, end):
-    ev = ShopTrafficEvent.objects.filter(day__range=(start, end))
-    pages = ev.filter(event_type='page')
-    s_dt, e_dt = _bounds(start, end)
-    orders = CustomerOrder.objects.filter(created_at__gte=s_dt, created_at__lt=e_dt).exclude(status='cancelled')
-    return {
-        'views': pages.count(),
-        'visitors': pages.values('session_key').distinct().count(),
-        'product_views': ev.filter(event_type='product').count(),
-        'cart_adds': ev.filter(event_type='cart_add').count(),
-        'searches': ShopSearchLog.objects.filter(day__range=(start, end)).count(),
-        'orders': orders.count(),
-    }
+def _period(request):
+    try:
+        days = int(request.GET.get('days', 1))
+    except (TypeError, ValueError):
+        days = 1
+    if days not in PERIODS:
+        days = 1
+    today = timezone.localtime(timezone.now()).date()
+    return days, today - timedelta(days=days - 1), today
 
 
 @login_required
@@ -62,124 +51,131 @@ def traffic_analytics(request):
     except Exception:
         pass
 
-    try:
-        days = int(request.GET.get('days', 1))
-    except (TypeError, ValueError):
-        days = 1
-    if days not in PERIODS:
-        days = 1
+    days, start, today = _period(request)
+    d = collect(start, today, limit=20)
 
-    today = timezone.localtime(timezone.now()).date()
-    start = today - timedelta(days=days - 1)
-    prev_end = start - timedelta(days=1)
-    prev_start = prev_end - timedelta(days=days - 1)
-
-    cur, prev = _kpis(start, today), _kpis(prev_start, prev_end)
-    kpis = []
-    for key, label, icon in (
-        ('views', 'Total Views', '👁️'), ('visitors', 'Unique Visitors', '🧑‍🤝‍🧑'),
-        ('product_views', 'Product Views', '🛍️'), ('cart_adds', 'Add to Cart', '🛒'),
-        ('searches', 'Searches', '🔎'), ('orders', 'Orders', '📦'),
-    ):
-        kpis.append({'label': label, 'icon': icon, 'value': cur[key], 'change': _pct_change(cur[key], prev[key])})
-
-    ev = ShopTrafficEvent.objects.filter(day__range=(start, today))
-    pages = ev.filter(event_type='page')
-
-    # ---- daily chart ----
-    by_day = {r['day']: r for r in pages.values('day').annotate(
-        v=Count('id'), u=Count('session_key', distinct=True))}
-    chart_labels, chart_views, chart_visitors = [], [], []
-    for i in range(days):
-        d = start + timedelta(days=i)
-        chart_labels.append(d.strftime('%d %b'))
-        chart_views.append(by_day.get(d, {}).get('v', 0))
-        chart_visitors.append(by_day.get(d, {}).get('u', 0))
-
-    # ---- peak hours ----
-    hours = {r['hour']: r['n'] for r in pages.values('hour').annotate(n=Count('id'))}
-    hour_data = [hours.get(h, 0) for h in range(24)]
-    peak_hour = max(range(24), key=lambda h: hour_data[h]) if any(hour_data) else None
-
-    # ---- devices & sources (distinct visitors) ----
-    devices = [{'name': (r['device'] or 'unknown').title(), 'n': r['n']} for r in
-               pages.values('device').annotate(n=Count('session_key', distinct=True)).order_by('-n')]
-    sources = [{'name': SOURCE_LABELS.get(r['source'], r['source'].title()), 'n': r['n']} for r in
-               pages.exclude(source='internal').values('source').annotate(
-                   n=Count('session_key', distinct=True)).order_by('-n')]
-
-    # ---- funnel (visitors -> viewed a product -> added to cart -> ordered) ----
-    funnel = [
-        ('Visitors', cur['visitors']),
-        ('Product dekha', ev.filter(event_type='product').values('session_key').distinct().count()),
-        ('Cart mein dala', ev.filter(event_type='cart_add').values('session_key').distinct().count()),
-        ('Order kiya', cur['orders']),
-    ]
-    top_n = funnel[0][1] or 0
-    funnel = [{'label': l, 'n': n, 'pct': round(n * 100.0 / top_n) if top_n else 0} for l, n in funnel]
-
-    # ---- products: views -> cart -> orders ----
-    s_dt, e_dt = _bounds(start, today)
-    prod_rows = {}
-    for r in ev.exclude(event_type='page').exclude(product__isnull=True).values('product_id').annotate(
-            name=Max('product_name'),
-            views=Count('id', filter=Q(event_type='product')),
-            viewers=Count('session_key', distinct=True, filter=Q(event_type='product')),
-            carts=Count('id', filter=Q(event_type='cart_add'))):
-        prod_rows[r['product_id']] = {
-            'id': r['product_id'], 'name': r['name'] or f"#{r['product_id']}", 'views': r['views'],
-            'viewers': r['viewers'], 'carts': r['carts'], 'orders': 0, 'qty': 0}
-    ordered = CustomerOrderItem.objects.filter(
-        order__created_at__gte=s_dt, order__created_at__lt=e_dt).exclude(order__status='cancelled') \
-        .values('product_id').annotate(name=Max('product_name'), o=Count('order', distinct=True),
-                                       q=Sum('quantity'))
-    for r in ordered:
-        row = prod_rows.setdefault(r['product_id'], {
-            'id': r['product_id'], 'name': r['name'] or f"#{r['product_id']}", 'views': 0,
-            'viewers': 0, 'carts': 0, 'orders': 0, 'qty': 0})
-        row['orders'], row['qty'] = r['o'], r['q'] or 0
-    products = list(prod_rows.values())
-    for p in products:
-        p['conv'] = round(p['orders'] * 100.0 / p['views'], 1) if p['views'] else None
-    top_viewed = sorted(products, key=lambda p: (-p['views'], -p['orders']))[:20]
-    top_viewed = [p for p in top_viewed if p['views']]
-    viewed_not_bought = sorted([p for p in products if p['views'] >= 3 and p['orders'] == 0],
-                               key=lambda p: -p['views'])[:10]
-
-    # ---- searches ----
-    def _search_stats(a, b):
-        return {r['keyword_norm']: r for r in ShopSearchLog.objects.filter(day__range=(a, b))
-                .values('keyword_norm').annotate(
-                    n=Count('id'), zero=Count('id', filter=Q(results_count=0)),
-                    users=Count('session_key', distinct=True), shown=Max('keyword'), found=Max('results_count'))}
-
-    cur_s, prev_s = _search_stats(start, today), _search_stats(prev_start, prev_end)
-    search_rows = sorted(cur_s.values(), key=lambda r: -r['n'])
-    top_searches = search_rows[:20]
-    not_found = sorted([r for r in search_rows if r['zero'] > 0], key=lambda r: -r['zero'])[:20]
-    trending = []
-    if days > 1:
-        for k, r in cur_s.items():
-            old = prev_s.get(k, {}).get('n', 0)
-            if r['n'] - old >= 2:
-                trending.append({'kw': r['shown'] or k, 'now': r['n'], 'before': old, 'new': old == 0})
-        trending = sorted(trending, key=lambda t: -(t['now'] - t['before']))[:10]
-
-    company = CompanyInfo.objects.first()
     try:
         live_now = LiveVisitor.get_active_count(seconds=60)
     except Exception:
         live_now = 0
+    company = CompanyInfo.objects.first()
     first_day = ShopTrafficEvent.objects.order_by('day').values_list('day', flat=True).first()
+    user = request.user
+    from ...security.permissions import has_matrix_perm
+    try:
+        can_manage = has_matrix_perm(user, 'manage_products')
+    except Exception:
+        can_manage = bool(user.is_superuser)
 
     return render(request, 'system/traffic_analytics.html', {
         'company_name': company.name if company else 'ERP System',
         'days': days, 'periods': PERIODS, 'start': start, 'end': today,
-        'kpis': kpis, 'live_now': live_now,
-        'chart_labels': chart_labels, 'chart_views': chart_views, 'chart_visitors': chart_visitors,
-        'hour_data': hour_data, 'peak_hour': peak_hour,
-        'devices': devices, 'sources': sources, 'funnel': funnel,
-        'top_viewed': top_viewed, 'viewed_not_bought': viewed_not_bought,
-        'top_searches': top_searches, 'not_found': not_found, 'trending': trending,
-        'tracking_since': first_day,
+        'kpis': d['kpis'], 'live_now': live_now,
+        'chart_labels': [r['day'].strftime('%d %b') for r in d['daily']],
+        'chart_views': [r['views'] for r in d['daily']],
+        'chart_visitors': [r['visitors'] for r in d['daily']],
+        'hour_data': d['hour_data'], 'peak_hour': d['peak_hour'],
+        'devices': d['devices'], 'sources': d['sources'], 'funnel': d['funnel'],
+        'top_viewed': d['top_viewed'], 'viewed_not_bought': d['viewed_not_bought'],
+        'top_searches': d['top_searches'], 'not_found': d['not_found'],
+        'handled_rows': d['handled_rows'], 'trending': d['trending'], 'areas': d['areas'],
+        'tracking_since': first_day, 'can_manage': can_manage,
+        'csv_tables': CSV_TABLES, 'mail_configured': bool(summary_recipients()),
     })
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+@login_required
+@perm_required('view_analytics')
+def traffic_export(request):
+    days, start, today = _period(request)
+    d = collect(start, today, limit=None)
+    stamp = f"{start:%Y%m%d}-{today:%Y%m%d}"
+    if request.GET.get('format') == 'csv':
+        table = request.GET.get('table', 'products')
+        if table not in CSV_TABLES:
+            table = 'products'
+        header, rows = table_rows(table, d)
+        resp = HttpResponse(content_type='text/csv; charset=utf-8')
+        resp['Content-Disposition'] = f'attachment; filename="traffic-{table}-{stamp}.csv"'
+        resp.write('\ufeff')                       # Excel mein Urdu/Unicode sahi khule
+        w = csv.writer(resp)
+        w.writerow(header)
+        w.writerows(rows)
+        return resp
+    resp = HttpResponse(
+        build_xlsx(d), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = f'attachment; filename="traffic-report-{stamp}.xlsx"'
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# "Not Found" keyword actions
+# ---------------------------------------------------------------------------
+
+@login_required
+@perm_required('manage_products')
+def traffic_product_search(request):
+    q = (request.GET.get('q') or '').strip()[:100]
+    if len(q) < 2:
+        return JsonResponse({'results': []})
+    qs = Product.objects.filter(is_active=True).filter(
+        Q(name__icontains=q) | Q(serial_no__icontains=q) | Q(barcode__icontains=q))[:10]
+    return JsonResponse({'results': [
+        {'id': p.id, 'name': p.name, 'sku': p.serial_no or p.barcode or ''} for p in qs]})
+
+
+@login_required
+@perm_required('manage_products')
+@require_POST
+def traffic_keyword_action(request):
+    try:
+        data = json.loads(request.body or '{}')
+    except ValueError:
+        data = {}
+    kw = normalize_keyword(data.get('keyword'))
+    action = data.get('action')
+    if not kw or action not in ('alias', 'ignore'):
+        return JsonResponse({'success': False, 'message': 'Invalid request'}, status=400)
+    if not ShopSearchLog.objects.filter(keyword_norm=kw).exists():
+        return JsonResponse({'success': False, 'message': 'Ye keyword search log mein nahi mila'}, status=404)
+
+    if action == 'ignore':
+        ShopKeywordAction.objects.update_or_create(
+            keyword_norm=kw, defaults={'action': ShopKeywordAction.IGNORED, 'product': None,
+                                       'created_by': request.user})
+        return JsonResponse({'success': True, 'message': f'"{kw}" ignore list mein chala gaya'})
+
+    try:
+        product = Product.objects.get(pk=int(data.get('product_id')), is_active=True)
+    except (TypeError, ValueError, Product.DoesNotExist):
+        return JsonResponse({'success': False, 'message': 'Product chunein'}, status=400)
+    if not ProductAlias.objects.filter(product=product, alias__iexact=kw).exists():
+        ProductAlias.objects.create(product=product, alias=kw[:100], created_by=request.user)
+    ShopKeywordAction.objects.update_or_create(
+        keyword_norm=kw, defaults={'action': ShopKeywordAction.ALIAS, 'product': product,
+                                   'created_by': request.user})
+    return JsonResponse({'success': True, 'message': f'"{kw}" ab "{product.name}" se judd gaya. '
+                                                     f'Shop mein ye search ab is product ko dikhayegi.'})
+
+
+# ---------------------------------------------------------------------------
+# Daily summary email: manual "bhejo" button
+# ---------------------------------------------------------------------------
+
+@login_required
+@perm_required('view_analytics')
+@require_POST
+def traffic_send_summary(request):
+    to = summary_recipients()
+    if not to:
+        return JsonResponse({'success': False, 'message': 'SUMMERY_REC secret set nahi hai.'}, status=400)
+    yesterday = timezone.localtime(timezone.now()).date() - timedelta(days=1)
+    try:
+        send_daily_summary(yesterday, to=to)
+    except Exception as exc:
+        return JsonResponse({'success': False, 'message': f'Email nahi gayi: {exc}'}, status=500)
+    return JsonResponse({'success': True, 'message': f'Kal ki summary {len(to)} address par bhej di gayi.'})
