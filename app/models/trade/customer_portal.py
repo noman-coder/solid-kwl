@@ -450,6 +450,11 @@ class CustomerProfile(models.Model):
         null=True,
         verbose_name="Trust Reset Reason"
     )
+
+    # Customer ki (uski ijazat se li hui) current location - qareeb tareen stores dikhane ke liye
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    location_updated_at = models.DateTimeField(null=True, blank=True)
     
     # Timestamps
     last_login_at = models.DateTimeField(null=True, blank=True)

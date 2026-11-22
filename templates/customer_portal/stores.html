@@ -240,12 +240,13 @@
       <span class="st-badge st-{{ s.status }}">{% if s.status == 'open' %}Open{% elif s.status == 'busy' %}Busy{% else %}Closed{% endif %}</span>
       <div class="st-logo" {% if s.logo %}style="background-image:url('{{ s.logo.url }}')"{% endif %}>{% if not s.logo %}{{ s.business_name|slice:":1"|upper }}{% endif %}</div>
       <div class="st-body">
-        <div class="st-name">{{ s.business_name }}</div>
+        <div class="st-name">{{ s.business_name }}{% if s.location_verified %}{% include "customer_portal/_verified_tick.html" %}{% endif %}</div>
         <div class="st-tags">{% if s.store_category %}<span class="st-ctype">{{ s.store_category.icon }} {{ s.store_category.name }}</span> &middot; {% endif %}{% if s.tags %}{{ s.tags|join:" &bull; " }}{% else %}{{ s.product_count }} product{{ s.product_count|pluralize }}{% endif %}{% if s.city %} &middot; {{ s.city }}{% endif %}</div>
         <div class="st-meta">
           {% if s.rating_avg %}<span style="background:#fff7e6;color:#b45309;font-weight:700;padding:1px 8px;border-radius:10px;"><i class="bi bi-star-fill" style="color:#f59e0b;"></i> {{ s.rating_avg }} <small style="font-weight:500;">({{ s.rating_count }})</small></span>
           {% else %}<span style="background:#eef2ff;color:#4338ca;font-weight:700;padding:1px 8px;border-radius:10px;">New</span>{% endif %}
-          <span><i class="bi bi-clock"></i> {{ s.delivery_time_min }}-{{ s.delivery_time_max }} min</span>
+          {% if s.distance_text %}<span style="color:#2563eb;font-weight:700;"><i class="bi bi-geo-alt-fill"></i> {{ s.distance_text }}</span>
+          {% endif %}<span><i class="bi bi-clock"></i> {{ s.delivery_time_min }}-{{ s.delivery_time_max }} min</span>
           <span><i class="bi bi-bicycle"></i> {% if s.is_free_delivery %}<span class="free">Free</span>{% else %}{{ currency }} {{ s.delivery_fee|floatformat:0 }}{% endif %}</span>
           {% if s.min_order_amount > 0 %}<span><i class="bi bi-basket"></i> Min {{ currency }} {{ s.min_order_amount|floatformat:0 }}</span>{% endif %}
         </div>
@@ -295,4 +296,5 @@
   start();
 })();
 </script>
+{% include 'customer_portal/_location_prompt.html' %}
 {% endblock %}

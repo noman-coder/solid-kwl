@@ -49,6 +49,7 @@ from ..models import (
 from . import store_orders
 from .views_reviews import vendor_rating
 from .views_customer_auth import get_client_ip, is_valid_phone, normalize_phone, safe_login
+from .geo import max_accuracy_m, parse_coords
 
 logger = logging.getLogger(__name__)
 
@@ -472,6 +473,65 @@ def vendor_dashboard(request):
         'commission_percent': commission_percent(profile),
         'new_orders': SaleOrder.objects.filter(vendor=vendor, status='pending').count(),
         'company_name': _company_name(),
+    })
+
+
+# ============================================
+# 3b. STORE LOCATION VERIFICATION (blue tick)
+# ============================================
+
+@vendor_login_required
+def vendor_location_verify(request):
+    """
+    GET  : Urdu privacy page (hum location kyun lete hain) + "Main ittefaq karta hun" button.
+    POST : browser se aayi current location (lat/lng) + consent -> VendorProfile mein save,
+           location_verified=True (store naam ke saath blue tick).
+    Sirf naye columns update hote hain; koi purana data nahi chhera jata.
+    """
+    profile = request.user.vendor_profile
+
+    if request.method == 'POST':
+        wants_json = request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'json' in (request.content_type or '')
+
+        def fail(msg, status=400):
+            if wants_json:
+                return JsonResponse({'success': False, 'error': msg}, status=status)
+            messages.error(request, msg)
+            return redirect('vendor_location_verify')
+
+        if not profile.is_approved:
+            return fail('Pehle admin aap ka account approve kare, phir location verify hogi.', 403)
+
+        if (request.POST.get('consent') or '') != '1':
+            return fail('Location lene se pehle aap ka ittefaq (agree) zaroori hai.')
+
+        lat, lng, acc, err = parse_coords(request)
+        if err:
+            return fail(err)
+        if acc is not None and acc > max_accuracy_m():
+            return fail('Location sahi tarah nahi aayi (ghalti %d meter). Store ke andar phone ka GPS/Location on kar '
+                        'ke dobara koshish karein.' % acc)
+
+        profile.latitude, profile.longitude, profile.location_accuracy_m = lat, lng, acc
+        profile.location_consent_at = now()
+        profile.location_verified = True
+        profile.location_verified_at = now()
+        profile.save(update_fields=[
+            'latitude', 'longitude', 'location_accuracy_m', 'location_consent_at',
+            'location_verified', 'location_verified_at',
+        ])
+        logger.info('Vendor %s store location verified', profile.pk)
+
+        if wants_json:
+            return JsonResponse({'success': True, 'redirect': reverse('vendor_dashboard')})
+        messages.success(request, 'Aap ke store ki location verify ho gayi. Ab store naam ke saath blue tick nazar aayega.')
+        return redirect('vendor_dashboard')
+
+    return render(request, 'customer_portal/vendor/location_verify.html', {
+        'page_title': 'Store location verify karein',
+        'profile': profile,
+        'company_name': _company_name(),
+        'max_accuracy': int(max_accuracy_m()),
     })
 
 

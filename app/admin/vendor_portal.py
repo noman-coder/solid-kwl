@@ -32,16 +32,23 @@ class DeliveryAreaAdmin(admin.ModelAdmin):
 
 @admin.register(VendorProfile, site=admin.site)
 class VendorProfileAdmin(admin.ModelAdmin):
-    list_display = ('business_name', 'vendor', 'user', 'city', 'store_category', 'is_approved', 'store_status', 'created_at', 'last_login_at')
-    list_filter = ('is_approved', 'store_status', 'store_category', 'city')
+    list_display = ('business_name', 'vendor', 'user', 'city', 'store_category', 'is_approved', 'location_verified', 'store_status', 'created_at', 'last_login_at')
+    list_filter = ('is_approved', 'location_verified', 'store_status', 'store_category', 'city')
     search_fields = ('business_name', 'vendor__name', 'vendor__contact_number', 'user__email')
-    readonly_fields = ('vendor', 'user', 'approved_at', 'last_login_at', 'created_at')
-    actions = ['approve_accounts', 'suspend_accounts']
+    readonly_fields = ('vendor', 'user', 'approved_at', 'last_login_at', 'created_at',
+                       'latitude', 'longitude', 'location_accuracy_m', 'location_consent_at', 'location_verified_at')
+    actions = ['approve_accounts', 'suspend_accounts', 'remove_location_verification']
 
     @admin.action(description='Approve selected vendors')
     def approve_accounts(self, request, queryset):
         n = queryset.filter(is_approved=False).update(is_approved=True, approved_at=now())
         self.message_user(request, f'{n} vendor(s) approved.', messages.SUCCESS)
+
+    @admin.action(description='Location verification hatao (blue tick + saved location delete)')
+    def remove_location_verification(self, request, queryset):
+        n = queryset.update(location_verified=False, latitude=None, longitude=None,
+                            location_accuracy_m=None, location_consent_at=None, location_verified_at=None)
+        self.message_user(request, f'{n} vendor(s) ki location verification hata di gayi.', messages.WARNING)
 
     @admin.action(description='Suspend selected vendors (aur unke products shop se hatao)')
     def suspend_accounts(self, request, queryset):

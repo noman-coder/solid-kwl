@@ -911,6 +911,9 @@ def shop_home(request):
     # ✅ Delivery settings for banner
     delivery_settings = get_delivery_settings()
 
+    from .geo import get_customer_location
+    shop_customer_loc = get_customer_location(request)
+
     # Talabat-style home: admin banners + featured stores (sirf kharab hone par khali, page nahi tootta)
     banners, featured_stores = [], []
     try:
@@ -928,7 +931,12 @@ def shop_home(request):
         order = {'open': 0, 'busy': 1, 'closed': 2}
         for st in featured_stores:
             st.status = st.status_label
-        featured_stores.sort(key=lambda x: order.get(x.status, 3))
+        from .geo import attach_distances
+        attach_distances(featured_stores, shop_customer_loc)
+        featured_stores.sort(key=lambda x: (
+            order.get(x.status, 3),
+            x.distance_km if x.distance_km is not None else float('inf'),
+        ))
     except Exception as e:
         logger.error(f"Shop home banners/stores error: {e}")
         banners, featured_stores = [], []
@@ -963,6 +971,7 @@ def shop_home(request):
         'recently_viewed': recently_viewed,
         'live_visitor_count': live_visitor_count,
         'delivery_settings': delivery_settings,
+        'location_prompt': shop_customer_loc is None,
         'delivery_area': get_delivery_area(request),
         'delivery_cities': [c.title() for c in (delivery_settings.get('city_charges') or {}).keys() if c != 'other'],
         'delivery_area_groups': [(c, [a.label for a in items]) for c, items in DeliveryArea.grouped()],

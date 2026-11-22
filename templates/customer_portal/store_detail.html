@@ -129,10 +129,10 @@
     <div class="sd-top">
       <div class="sd-logo" {% if store.logo %}style="background-image:url('{{ store.logo.url }}')"{% endif %}>{% if not store.logo %}{{ store.business_name|slice:":1"|upper }}{% endif %}</div>
       <div style="min-width:0;">
-        <div class="sd-name">{{ store.business_name }}
+        <div class="sd-name">{{ store.business_name }}{% if store.location_verified %}{% include "customer_portal/_verified_tick.html" %}{% endif %}
           <span class="sd-badge sd-{{ status }}">{% if status == 'open' %}Open{% elif status == 'busy' %}Busy{% else %}Closed{% endif %}</span>
         </div>
-        <div class="sd-sub">{% if store.store_category %}<b>{{ store.store_category.icon }} {{ store.store_category.name }}</b>{% if store_tags or store.city %} &middot; {% endif %}{% endif %}{% if store_tags %}{{ store_tags|join:" &bull; " }}{% endif %}{% if store.city %}{% if store_tags %} &middot; {% endif %}<i class="bi bi-geo-alt"></i> {{ store.city }}{% endif %}</div>
+        <div class="sd-sub">{% if store.store_category %}<b>{{ store.store_category.icon }} {{ store.store_category.name }}</b>{% if store_tags or store.city %} &middot; {% endif %}{% endif %}{% if store_tags %}{{ store_tags|join:" &bull; " }}{% endif %}{% if store.city %}{% if store_tags %} &middot; {% endif %}<i class="bi bi-geo-alt"></i> {{ store.city }}{% endif %}{% if distance_text %} &middot; <b style="color:#2563eb;"><i class="bi bi-geo-alt-fill"></i> {{ distance_text }} door</b>{% endif %}</div>
       </div>
     </div>
 
@@ -343,4 +343,5 @@
   paintAll();
 })();
 </script>
+{% include 'customer_portal/_location_prompt.html' %}
 {% endblock %}

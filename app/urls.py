@@ -7,6 +7,7 @@ from . import shop_traffic_views
 from app.customer import views_customer_auth
 from app.customer import views_account_deletion
 from app.customer import views_vendor_portal
+from app.customer import views_location
 from app.customer import views_rider_portal
 from app.customer import views_password_reset
 from app.customer import views_rider_password_reset
@@ -1137,6 +1138,7 @@ urlpatterns = [
      path('shop/vendor/products/<int:pk>/edit/', views_vendor_portal.vendor_product_edit, name='vendor_product_edit'),
      path('shop/vendor/products/<int:pk>/toggle/', views_vendor_portal.vendor_product_toggle, name='vendor_product_toggle'),
      path('shop/vendor/store/', views_vendor_portal.vendor_store_settings, name='vendor_store_settings'),
+     path('shop/vendor/location/', views_vendor_portal.vendor_location_verify, name='vendor_location_verify'),
      path('shop/vendor/orders/', views_vendor_portal.vendor_orders, name='vendor_orders'),
      path('shop/vendor/orders/<int:pk>/assign-rider/', views_rider_portal.vendor_assign_rider, name='vendor_assign_rider'),
      path('shop/vendor/orders/<int:pk>/<str:action>/', views_vendor_portal.vendor_order_action, name='vendor_order_action'),
@@ -1211,6 +1213,8 @@ urlpatterns = [
     path('admin-chat/stats/', views_frontend.admin_chat_stats_api, name='admin_chat_stats_api'),
     path('shop/set-delivery-type/', views_customer_portal.set_delivery_type, name='set_delivery_type'),
     path('shop/set-area/', views_customer_portal.set_delivery_area, name='set_delivery_area'),
+    path('shop/set-location/', views_location.set_customer_location, name='set_customer_location'),
+    path('shop/clear-location/', views_location.clear_customer_location, name='clear_customer_location'),
     path('settings/delivery/', views_delivery.delivery_settings_view, name='delivery_settings_view'),
     path('settings/delivery/toggle/', views_delivery.delivery_settings_toggle, name='delivery_settings_toggle'),
     path('settings/delivery/reset/', views_delivery.delivery_settings_reset, name='delivery_settings_reset'),

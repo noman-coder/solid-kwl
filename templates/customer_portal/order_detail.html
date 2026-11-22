@@ -78,7 +78,7 @@
             <div class="d-flex flex-column gap-2">
                 {% for st in suggested_stores %}
                 <a href="{% url 'store_detail' st.pk %}" class="btn btn-outline-primary text-start">
-                    <i class="bi bi-shop"></i> {{ st.business_name }}
+                    <i class="bi bi-shop"></i> {{ st.business_name }}{% if st.location_verified %}{% include "customer_portal/_verified_tick.html" %}{% endif %}
                     <span class="small text-muted">&middot; {{ st.delivery_time_min }}-{{ st.delivery_time_max }} min{% if st.min_order_amount > 0 %} &middot; Min Rs. {{ st.min_order_amount|floatformat:0 }}{% endif %}</span>
                 </a>
                 {% endfor %}

@@ -17,6 +17,7 @@ from django.shortcuts import get_object_or_404, render
 from ..models import Category, CompanyInfo, Product, ShopBanner, StoreCategory, VendorProfile
 from .views_customer_portal import get_cart_count_value, get_delivery_area, get_product_final_price
 from .views_reviews import store_rating_map, store_reviews
+from .geo import attach_distances, format_distance, get_customer_location, haversine_km
 
 STATUS_ORDER = {'open': 0, 'busy': 1, 'closed': 2}
 
@@ -70,6 +71,7 @@ CURRENCY = 'Rs'           # Pakistani Rupee. Baad mein settings se lena ho to ya
 
 SORTS = {
     'recommended': 'Recommended',
+    'nearest': 'Nearest to me',
     'rating': 'Top rated',
     'fastest': 'Fastest delivery',
     'fee': 'Lowest delivery fee',
@@ -81,9 +83,10 @@ def store_list(request):
     search = request.GET.get('q', '').strip()[:100]
     open_only = request.GET.get('open') == '1'
     free_only = request.GET.get('free') == '1'
-    sort = request.GET.get('sort', 'recommended')
-    if sort not in SORTS:
-        sort = 'recommended'
+    customer_loc = get_customer_location(request)
+    sort = request.GET.get('sort') or ('nearest' if customer_loc else 'recommended')
+    if sort not in SORTS or (sort == 'nearest' and not customer_loc):
+        sort = 'nearest' if customer_loc else 'recommended'
     try:
         category_id = int(request.GET.get('category', ''))
     except (TypeError, ValueError):
@@ -144,6 +147,8 @@ def store_list(request):
     if open_only:
         stores = [s for s in stores if s.status != 'closed']
 
+    attach_distances(stores, customer_loc)
+
     # ---- "Deliver to" area filter ----
     area = get_delivery_area(request)
     show_all = request.GET.get('all') == '1'
@@ -154,8 +159,10 @@ def store_list(request):
         outside_count = sum(1 for s in stores if not s.in_area)
         stores = [s for s in stores if s.in_area]
 
+    _far = float('inf')
     sort_keys = {
         'recommended': lambda s: (STATUS_ORDER[s.status], s.business_name.lower()),
+        'nearest': lambda s: (STATUS_ORDER[s.status], s.distance_km if s.distance_km is not None else _far, s.business_name.lower()),
         'rating': lambda s: (STATUS_ORDER[s.status], -(s.rating_avg or 0), -s.rating_count, s.business_name.lower()),
         'fastest': lambda s: (STATUS_ORDER[s.status], s.delivery_time_min, s.delivery_time_max),
         'fee': lambda s: (STATUS_ORDER[s.status], s.delivery_fee or 0),
@@ -177,7 +184,9 @@ def store_list(request):
         'open_only': open_only,
         'free_only': free_only,
         'sort': sort,
-        'sorts': SORTS,
+        'sorts': {k: v for k, v in SORTS.items() if k != 'nearest' or customer_loc},
+        'location_prompt': customer_loc is None,
+        'has_customer_location': customer_loc is not None,
         'delivery_area': area,
         'area_filter_on': bool(area) and not show_all,
         'outside_count': outside_count,
@@ -236,8 +245,15 @@ def store_detail(request, pk):
         p.in_cart = p.cart_qty > 0
         p.stock_int = int(p.total_stock or 0)
 
+    customer_loc = get_customer_location(request)
+    distance_text = ''
+    if customer_loc and store.has_location:
+        distance_text = format_distance(haversine_km(customer_loc[0], customer_loc[1], store.latitude, store.longitude))
+
     return render(request, 'customer_portal/store_detail.html', {
         'reviews': store_reviews(store.vendor),
+        'distance_text': distance_text,
+        'location_prompt': customer_loc is None,
         'store': store,
         'status': store.status_label,
         'products': page_obj,

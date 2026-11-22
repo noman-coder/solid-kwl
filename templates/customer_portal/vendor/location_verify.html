@@ -1,0 +1,116 @@
+{% extends 'customer_portal/base_shop.html' %}
+{% block bottom_nav %}{% endblock %}
+{% load static %}
+
+{% block title %}Store location verify - {{ company_name }}{% endblock %}
+
+{% block content %}
+<style>
+    body { background: #f3f5ff; }
+    .lv-wrap { max-width: 720px; margin: 24px auto; padding: 0 14px; }
+    .lv-card { background: #fff; border-radius: 22px; box-shadow: 0 6px 20px rgba(0,0,0,.07); padding: 26px 24px; }
+    .lv-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .lv-head h4 { margin: 0; font-weight: 700; }
+    .lv-ur { direction: rtl; text-align: right; line-height: 2.1; font-size: 18px;
+             font-family: 'Jameel Noori Nastaleeq','Noto Nastaliq Urdu','Noto Naskh Arabic','Segoe UI',Tahoma,serif; }
+    .lv-ur h5 { font-weight: 700; margin: 0 0 8px; font-size: 22px; }
+    .lv-ur ul { padding: 0 22px 0 0; margin: 10px 0 14px; }
+    .lv-ur li { margin-bottom: 6px; }
+    .lv-box { background: #eef6ff; border-radius: 14px; padding: 14px 16px; margin: 14px 0; }
+    .lv-check { display: flex; gap: 10px; align-items: flex-start; direction: rtl; text-align: right; cursor: pointer; }
+    .lv-check input { width: 22px; height: 22px; margin-top: 8px; flex: none; }
+    .lv-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; direction: rtl; }
+    .lv-btn { border: 0; border-radius: 24px; padding: 12px 26px; font-weight: 700; font-size: 16px; cursor: pointer;
+              text-decoration: none; display: inline-block; }
+    .lv-btn.primary { background: linear-gradient(135deg,#2563eb,#7c3aed); color: #fff; }
+    .lv-btn.primary[disabled] { opacity: .45; cursor: not-allowed; }
+    .lv-btn.ghost { background: #eef0f6; color: #333; }
+    .lv-msg { display: none; margin-top: 14px; padding: 12px 14px; border-radius: 12px; }
+    .lv-msg.err { display: block; background: #f8d7da; color: #721c24; }
+    .lv-msg.info { display: block; background: #d1ecf1; color: #0c5460; }
+    .lv-note { font-size: 13px; color: #6b7280; margin-top: 12px; }
+    @media (max-width: 576px) { .lv-card { padding: 20px 16px; } .lv-ur { font-size: 17px; } .lv-btn { width: 100%; text-align: center; } }
+</style>
+
+<div class="lv-wrap">
+  <div class="lv-card">
+    <div class="lv-head">
+      <h4>{{ profile.business_name }}</h4>
+      {% if profile.location_verified %}{% include 'customer_portal/_verified_tick.html' %}{% endif %}
+    </div>
+
+    <div class="lv-ur">
+      <h5>اپنے اسٹور کی لوکیشن ویریفائی کریں</h5>
+      <p>ہم آپ سے آپ کے اسٹور کی لوکیشن کیوں مانگ رہے ہیں؟ براہِ مہربانی نیچے دی گئی باتیں پڑھ لیں:</p>
+      <ul>
+        <li>تاکہ آپ کے اسٹور کی اصل جگہ معلوم ہو سکے اور گاہک اپنے <b>قریب ترین اسٹورز</b> سے خریداری کر سکیں۔</li>
+        <li>لوکیشن ویریفائی ہونے پر آپ کے اسٹور کے نام کے ساتھ <b>نیلا ٹک ✔</b> لگ جاتا ہے، جس سے گاہکوں کا اعتماد بڑھتا ہے۔</li>
+        <li>گاہک کو صرف <b>فاصلہ</b> (مثلاً 2.3 کلومیٹر) نظر آتا ہے۔ آپ کی لوکیشن کے نمبر (کوآرڈینیٹس) عام لوگوں کو نہیں دکھائے جاتے۔</li>
+        <li>صرف اسی وقت کی <b>موجودہ لوکیشن</b> لی جاتی ہے۔ آپ کی مسلسل نگرانی (ٹریکنگ) نہیں کی جاتی۔</li>
+        <li>بہتر ہے کہ آپ یہ کام اپنی <b>دکان کے اندر کھڑے ہو کر</b> اور فون کی لوکیشن/GPS آن کر کے کریں۔</li>
+        <li>آپ جب چاہیں دوبارہ آ کر لوکیشن اپڈیٹ کر سکتے ہیں۔</li>
+      </ul>
+    </div>
+
+    {% if not profile.is_approved %}
+      <div class="lv-msg info" style="display:block;direction:rtl;text-align:right;">آپ کا اکاؤنٹ ابھی ایڈمن کی منظوری کا منتظر ہے۔ منظوری کے بعد آپ لوکیشن ویریفائی کر سکیں گے۔</div>
+    {% else %}
+      {% csrf_token %}
+      <div class="lv-box">
+        <label class="lv-check lv-ur" style="font-size:17px;line-height:1.9;">
+          <input type="checkbox" id="lvConsent">
+          <span>میں اوپر دی گئی باتوں سے متفق ہوں اور اپنے اسٹور کی <b>موجودہ لوکیشن</b> لینے کی اجازت دیتا/دیتی ہوں۔</span>
+        </label>
+      </div>
+
+      <div class="lv-actions">
+        <button type="button" id="lvGo" class="lv-btn primary lv-ur" style="line-height:1.6;" disabled>
+          {% if profile.location_verified %}لوکیشن دوبارہ اپڈیٹ کریں{% else %}متفق ہوں، لوکیشن لیں{% endif %}
+        </button>
+        <a href="{% url 'vendor_dashboard' %}" class="lv-btn ghost lv-ur" style="line-height:1.6;">واپس جائیں</a>
+      </div>
+      <div id="lvMsg" class="lv-msg lv-ur" style="font-size:16px;line-height:1.9;"></div>
+      <p class="lv-note">Browser آپ سے Location کی اجازت مانگے گا، "Allow" پر ٹیپ کریں۔ (Location کے لیے سائٹ کا https پر ہونا ضروری ہے۔)</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if profile.is_approved %}
+<script>
+(function () {
+  var consent = document.getElementById('lvConsent'), go = document.getElementById('lvGo'), msg = document.getElementById('lvMsg');
+  var tokenEl = document.querySelector('input[name=csrfmiddlewaretoken]');
+  function show(text, kind) { msg.className = 'lv-msg lv-ur ' + kind; msg.textContent = text; }
+  consent.addEventListener('change', function () { go.disabled = !consent.checked; });
+
+  go.addEventListener('click', function () {
+    if (!consent.checked) return;
+    if (!('geolocation' in navigator)) { show('آپ کا براؤزر لوکیشن سپورٹ نہیں کرتا۔ کسی اور براؤزر/فون سے کوشش کریں۔', 'err'); return; }
+    go.disabled = true;
+    show('لوکیشن حاصل کی جا رہی ہے... براہِ مہربانی انتظار کریں اور اجازت (Allow) دیں۔', 'info');
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      var body = new URLSearchParams({
+        consent: '1', lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy
+      });
+      fetch('{% url "vendor_location_verify" %}', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'X-CSRFToken': tokenEl ? tokenEl.value : '', 'X-Requested-With': 'XMLHttpRequest',
+                   'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString()
+      }).then(function (r) { return r.json().catch(function () { return { success: false, error: 'سرور کا جواب سمجھ نہیں آیا' }; }); })
+        .then(function (d) {
+          if (d.success) { show('شکریہ! آپ کی لوکیشن ویریفائی ہو گئی ہے۔', 'info'); window.location = d.redirect; }
+          else { show(d.error || 'لوکیشن محفوظ نہیں ہو سکی۔ دوبارہ کوشش کریں۔', 'err'); go.disabled = false; }
+        }).catch(function () { show('انٹرنیٹ کا مسئلہ ہے، دوبارہ کوشش کریں۔', 'err'); go.disabled = false; });
+    }, function (err) {
+      var t = 'لوکیشن حاصل نہیں ہو سکی۔ دوبارہ کوشش کریں۔';
+      if (err && err.code === 1) t = 'آپ نے لوکیشن کی اجازت نہیں دی۔ براؤزر/فون کی سیٹنگ میں اس سائٹ کے لیے Location "Allow" کریں اور دوبارہ کوشش کریں۔';
+      else if (err && err.code === 2) t = 'لوکیشن دستیاب نہیں۔ فون کا GPS/Location آن کریں اور دوبارہ کوشش کریں۔';
+      else if (err && err.code === 3) t = 'لوکیشن ملنے میں بہت دیر ہو گئی۔ کھلی جگہ پر جا کر دوبارہ کوشش کریں۔';
+      show(t, 'err'); go.disabled = false;
+    }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

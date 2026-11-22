@@ -112,6 +112,20 @@ class VendorProfile(models.Model):
                   "Khali = sirf store ke shehar mein."
     )
 
+    # ---- Verified store location (blue tick) ----
+    # Vendor ki marzi (consent) ke baad uske phone/browser se li gayi location.
+    # Sab fields null/False default ke saath hain, is liye purana data jyon ka tyon rehta hai.
+    latitude = models.FloatField(null=True, blank=True, help_text="Store ki verified latitude")
+    longitude = models.FloatField(null=True, blank=True, help_text="Store ki verified longitude")
+    location_accuracy_m = models.FloatField(
+        null=True, blank=True, help_text="GPS accuracy (meters) jab location li gayi")
+    location_consent_at = models.DateTimeField(
+        null=True, blank=True, help_text="Vendor ne privacy page par kab ittefaq kiya")
+    location_verified = models.BooleanField(
+        default=False, verbose_name="Location verified",
+        help_text="True = store naam ke saath blue tick nazar aata hai")
+    location_verified_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         verbose_name_plural = '3.2 Vendor Portal Accounts'
         ordering = ['-created_at']
@@ -133,6 +147,11 @@ class VendorProfile(models.Model):
                 seen.add(name.lower())
                 out.append(name)
         return out[:cls.MAX_AREAS]
+
+    @property
+    def has_location(self):
+        """Verified location maujood hai? (distance sirf isi surat mein dikhai jati hai)"""
+        return bool(self.location_verified and self.latitude is not None and self.longitude is not None)
 
     @property
     def delivery_area_list(self):
