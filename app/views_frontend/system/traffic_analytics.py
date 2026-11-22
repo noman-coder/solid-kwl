@@ -20,7 +20,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from ...models import (
-    CompanyInfo, LiveVisitor, Product, ProductAlias, ShopKeywordAction, ShopSearchLog, ShopTrafficEvent,
+    CompanyInfo, LiveVisitor, Product, ProductAlias, ShopCartFollowup, ShopHiddenItem, ShopKeywordAction,
+    ShopSearchLog, ShopTrafficEvent,
 )
 from ...security.permissions import perm_required
 from ...shop_traffic import (
@@ -42,6 +43,14 @@ def _period(request):
     return days, today - timedelta(days=days - 1), today
 
 
+def _can(user, perm):
+    from ...security.permissions import has_matrix_perm
+    try:
+        return bool(user.is_superuser or has_matrix_perm(user, perm))
+    except Exception:
+        return bool(user.is_superuser)
+
+
 @login_required
 @perm_required('view_analytics')
 def traffic_analytics(request):
@@ -52,7 +61,8 @@ def traffic_analytics(request):
         pass
 
     days, start, today = _period(request)
-    d = collect(start, today, limit=20)
+    can_followup = _can(request.user, 'manage_orders')     # customer ka phone + WhatsApp follow-up
+    d = collect(start, today, limit=20, with_contacts=can_followup)
 
     try:
         live_now = LiveVisitor.get_active_count(seconds=60)
@@ -60,12 +70,7 @@ def traffic_analytics(request):
         live_now = 0
     company = CompanyInfo.objects.first()
     first_day = ShopTrafficEvent.objects.order_by('day').values_list('day', flat=True).first()
-    user = request.user
-    from ...security.permissions import has_matrix_perm
-    try:
-        can_manage = has_matrix_perm(user, 'manage_products')
-    except Exception:
-        can_manage = bool(user.is_superuser)
+    can_manage = _can(request.user, 'manage_products')
 
     return render(request, 'system/traffic_analytics.html', {
         'company_name': company.name if company else 'ERP System',
@@ -79,7 +84,10 @@ def traffic_analytics(request):
         'top_viewed': d['top_viewed'], 'viewed_not_bought': d['viewed_not_bought'],
         'top_searches': d['top_searches'], 'not_found': d['not_found'],
         'handled_rows': d['handled_rows'], 'trending': d['trending'], 'areas': d['areas'],
-        'tracking_since': first_day, 'can_manage': can_manage,
+        'tracking_since': first_day, 'can_manage': can_manage, 'can_followup': can_followup,
+        'checkout': d['checkout'], 'visitor_mix': d['visitor_mix'], 'abandoned': d['abandoned'],
+        'abandoned_value': sum(a['value'] for a in d['abandoned']),
+        'banners': d['banners'], 'stores': d['stores'], 'broken': d['broken'], 'pairs': d['pairs'],
         'csv_tables': CSV_TABLES, 'mail_configured': bool(summary_recipients()),
     })
 
@@ -92,7 +100,7 @@ def traffic_analytics(request):
 @perm_required('view_analytics')
 def traffic_export(request):
     days, start, today = _period(request)
-    d = collect(start, today, limit=None)
+    d = collect(start, today, limit=None, with_contacts=_can(request.user, 'manage_orders'))
     stamp = f"{start:%Y%m%d}-{today:%Y%m%d}"
     if request.GET.get('format') == 'csv':
         table = request.GET.get('table', 'products')
@@ -179,3 +187,38 @@ def traffic_send_summary(request):
     except Exception as exc:
         return JsonResponse({'success': False, 'message': f'Email nahi gayi: {exc}'}, status=500)
     return JsonResponse({'success': True, 'message': f'Kal ki summary {len(to)} address par bhej di gayi.'})
+
+
+# ---------------------------------------------------------------------------
+# Abandoned cart follow-up mark + hide 404 link
+# ---------------------------------------------------------------------------
+
+@login_required
+@perm_required('manage_orders')
+@require_POST
+def traffic_cart_followup(request):
+    """WhatsApp follow-up button dabane par: "contacted" nishan lagata hai (dobara spam se bachne ke liye)."""
+    try:
+        key = (json.loads(request.body or '{}').get('cart_key') or '').strip()
+    except ValueError:
+        key = ''
+    if len(key) != 32 or any(c not in '0123456789abcdef' for c in key):
+        return JsonResponse({'success': False, 'message': 'Invalid request'}, status=400)
+    ShopCartFollowup.objects.get_or_create(cart_key=key, defaults={'contacted_by': request.user})
+    return JsonResponse({'success': True})
+
+
+@login_required
+@perm_required('manage_products')
+@require_POST
+def traffic_hide_item(request):
+    """Theek ho chuke 404 link ko list se chhupana (sirf chhupata hai, record delete nahi hota)."""
+    try:
+        data = json.loads(request.body or '{}')
+    except ValueError:
+        data = {}
+    path = (data.get('key') or '').strip()[:255]
+    if data.get('kind') != '404' or not path.startswith('/'):
+        return JsonResponse({'success': False, 'message': 'Invalid request'}, status=400)
+    ShopHiddenItem.objects.get_or_create(kind='404', key=path)
+    return JsonResponse({'success': True})

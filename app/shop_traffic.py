@@ -67,6 +67,43 @@ def _session_key(request):
     return request.session.session_key or ''
 
 
+VID_COOKIE = 'kc_vid'
+
+
+def _visitor(request):
+    """Browser ki pehchan (1 saal ki cookie). Nayi ho to middleware cookie laga deta hai."""
+    vid = (request.COOKIES.get(VID_COOKIE) or '').strip()
+    if len(vid) == 36:
+        return vid
+    vid = getattr(request, '_kc_vid', '') or ''
+    if not vid:
+        import uuid
+        vid = str(uuid.uuid4())
+        request._kc_vid = vid
+        request._kc_vid_set = True
+    return vid
+
+
+def _user_id(request):
+    user = getattr(request, 'user', None)
+    if user is not None and user.is_authenticated and not (user.is_staff or user.is_superuser):
+        return user.id
+    return None
+
+
+def _touch_visitor(vid, day):
+    """ShopVisitor: naya hai to banao, purana ho to din mein sirf aik baar last_seen/visits update."""
+    if not _once(f"trf_vd:{vid}:{day}", 86400):
+        return
+    from django.db.models import F
+
+    from .models import ShopVisitor
+    obj, created = ShopVisitor.objects.get_or_create(
+        visitor_id=vid, defaults={'first_seen': day, 'last_seen': day, 'visits': 1})
+    if not created and obj.last_seen != day:
+        ShopVisitor.objects.filter(pk=obj.pk).update(last_seen=day, visits=F('visits') + 1)
+
+
 def _area(request):
     """Customer ka "Deliver to" shehar/area (session ya login customer ka address). Na mile to ''."""
     try:
@@ -104,7 +141,9 @@ def log_page(request):
         day, hour = _local_now()
         ShopTrafficEvent.objects.create(
             event_type='page', day=day, hour=hour, session_key=sk, path=path,
-            device=_device(request), source=_source(request), area=_area(request))
+            device=_device(request), source=_source(request), area=_area(request),
+            visitor_id=_visitor(request), user_id=_user_id(request))
+        _touch_visitor(_visitor(request), day)
         maybe_send_daily_summary()
     except Exception:
         logger.exception("Traffic page tracking failed")
@@ -122,24 +161,89 @@ def log_product_view(request, product):
         ShopTrafficEvent.objects.create(
             event_type='product', day=day, hour=hour, session_key=sk, product=product,
             product_name=(product.name or '')[:200], path=request.path[:255], device=_device(request),
-            area=_area(request))
+            area=_area(request), visitor_id=_visitor(request), user_id=_user_id(request))
     except Exception:
         logger.exception("Traffic product tracking failed")
 
 
-def log_cart_add(request, product, quantity=1):
+def log_cart_add(request, product, quantity=1, unit_price=None):
     try:
         if is_bot(request) or _is_staff(request):
             return
         sk = _session_key(request)
         from .models import ShopTrafficEvent
+        qty = max(int(quantity or 1), 1)
+        try:
+            amount = float(unit_price) * qty if unit_price is not None else 0
+        except (TypeError, ValueError):
+            amount = 0
         day, hour = _local_now()
         ShopTrafficEvent.objects.create(
             event_type='cart_add', day=day, hour=hour, session_key=sk, product=product,
-            product_name=(product.name or '')[:200], quantity=max(int(quantity or 1), 1),
-            path=request.path[:255], device=_device(request), area=_area(request))
+            product_name=(product.name or '')[:200], quantity=qty, amount=amount,
+            path=request.path[:255], device=_device(request), area=_area(request),
+            visitor_id=_visitor(request), user_id=_user_id(request))
     except Exception:
         logger.exception("Traffic cart tracking failed")
+
+
+def log_order(request, order):
+    """Order ban gaya (cart -> order funnel + abandoned-cart ke liye). Aik order aik hi baar."""
+    try:
+        if is_bot(request):
+            return
+        from .models import ShopTrafficEvent
+        if ShopTrafficEvent.objects.filter(event_type='order', ref_id=order.id).exists():
+            return
+        try:
+            amount = sum(float(i.total_amt) for i in order.items.all()) + float(order.delivery_fee or 0)
+        except Exception:
+            amount = 0
+        day, hour = _local_now()
+        ShopTrafficEvent.objects.create(
+            event_type='order', day=day, hour=hour, session_key=_session_key(request), ref_id=order.id,
+            amount=amount, label=(order.order_no or '')[:255], device=_device(request),
+            area=_area(request), visitor_id=_visitor(request), user_id=getattr(request.user, 'id', None))
+    except Exception:
+        logger.exception("Traffic order tracking failed")
+
+
+def log_banner_click(request, banner):
+    try:
+        if is_bot(request) or _is_staff(request):
+            return
+        from .models import ShopTrafficEvent
+        day, hour = _local_now()
+        ShopTrafficEvent.objects.create(
+            event_type='banner', day=day, hour=hour, session_key=_session_key(request), ref_id=banner.id,
+            label=(banner.title or '')[:255], device=_device(request), area=_area(request),
+            visitor_id=_visitor(request), user_id=_user_id(request))
+    except Exception:
+        logger.exception("Traffic banner tracking failed")
+
+
+NOT_FOUND_SKIP = re.compile(
+    r'^/(static|media|admin|favicon|robots|apple-touch|\.well-known)|\.(php|asp|aspx|env|git|sql|bak|zip|xml|txt|map|ico|png|jpe?g|gif|webp|svg|css|js)$|wp-|xmlrpc|phpmyadmin|cgi-bin',
+    re.I)
+
+
+def log_404(request):
+    """Customer ko jo page nahi mila (sirf asli visitors; scanner/bot aur image/css wale 404 nahi)."""
+    try:
+        path = request.path
+        if NOT_FOUND_SKIP.search(path) or is_bot(request) or _is_staff(request):
+            return
+        sk = _session_key(request)
+        if not _once(f"trf_404:{sk}:{path}", 60):
+            return
+        from .models import ShopTrafficEvent
+        ref = request.META.get('HTTP_REFERER', '')[:255]
+        day, hour = _local_now()
+        ShopTrafficEvent.objects.create(
+            event_type='notfound', day=day, hour=hour, session_key=sk, path=path[:255], label=ref,
+            device=_device(request), source=_source(request), visitor_id=_visitor(request))
+    except Exception:
+        logger.exception("Traffic 404 tracking failed")
 
 
 def log_search(request, keyword, results_count, corrected_to=''):
@@ -196,7 +300,7 @@ def rollup_old_traffic(keep_days=90, max_days=10, dry_run=False):
                 cart_adds=ev.filter(event_type='cart_add').count(),
                 searches=n_sr, zero_results=sr.filter(results_count=0).count())
             rows = []
-            for r in ev.exclude(event_type='page').values('product_id').annotate(
+            for r in ev.filter(event_type__in=['product', 'cart_add']).exclude(product__isnull=True).values('product_id').annotate(
                     name=Max('product_name'),
                     views=Count('id', filter=Q(event_type='product')),
                     visitors=Count('session_key', distinct=True, filter=Q(event_type='product')),
@@ -255,6 +359,12 @@ def build_summary_email(day):
         ('Top searches', [f"{r['shown'] or r['keyword_norm']}: {r['n']}" for r in d['top_searches']]),
         ('Not found (customers maang rahe, shop mein nahi)', [f"{r['shown'] or r['keyword_norm']}: {r['zero']}" for r in d['not_found']]),
         ('Top areas', [f"{a['name']}: {a['visitors']} visitors, {a['orders']} orders" for a in d['areas'][:5]]),
+        ('Abandoned carts (cart mein dala, order nahi hua)',
+         ([f"{len(d['abandoned'])} carts, Rs. {sum(a['value'] for a in d['abandoned'])} ka maal"] +
+          [f"{a['items']} (Rs. {a['value']})" for a in d['abandoned'][:3]]) if d['abandoned'] else []),
+        ('Naye vs wapas aane wale',
+         [f"Naye: {d['visitor_mix']['new']}, wapas aaye: {d['visitor_mix']['returning']}"] if d['visitor_mix']['total'] else []),
+        ('Broken links (404)', [f"{r['path']}: {r['hits']} baar" for r in d['broken'][:3]]),
     ]
     for head, items in sections:
         lines += ['', head + ':'] + (['  ' + i for i in items] or ['  -'])

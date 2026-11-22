@@ -200,6 +200,8 @@ def auto_place_order(request, customer):
 
             # Step 9b: Store (vendor) ko naye order ki khabar
             store_orders.notify_vendor_new_order(order)
+            from app.shop_traffic import log_order
+            log_order(request, order)
             store_orders.email_new_order(order, request)   # vendor + admin ko email
             
             # Step 10: Notify admin + shop admin (superuser + staff) - bell; email alag se email_new_order bhejta hai

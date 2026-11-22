@@ -13,10 +13,16 @@ class ShopTrafficEvent(models.Model):
     PAGE = 'page'
     PRODUCT = 'product'
     CART = 'cart_add'
+    ORDER = 'order'
+    BANNER = 'banner'
+    NOTFOUND = 'notfound'
     EVENT_TYPES = [
         (PAGE, 'Page view'),
         (PRODUCT, 'Product view'),
         (CART, 'Add to cart'),
+        (ORDER, 'Order placed'),
+        (BANNER, 'Banner click'),
+        (NOTFOUND, 'Page not found (404)'),
     ]
 
     event_type = models.CharField(max_length=10, choices=EVENT_TYPES, db_index=True)
@@ -32,6 +38,11 @@ class ShopTrafficEvent(models.Model):
     device = models.CharField(max_length=10, blank=True, default='')
     source = models.CharField(max_length=30, blank=True, default='direct')
     area = models.CharField(max_length=100, blank=True, default='', help_text='Customer ka "Deliver to" shehar/area')
+    visitor_id = models.CharField(max_length=36, blank=True, default='', db_index=True)
+    user_id = models.PositiveIntegerField(null=True, blank=True, help_text='Login customer ka user id')
+    ref_id = models.PositiveIntegerField(null=True, blank=True, help_text='Order / banner id')
+    label = models.CharField(max_length=255, blank=True, default='', help_text='Banner naam ya 404 ka referrer')
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     class Meta:
         verbose_name = 'Shop Traffic Event'
@@ -132,3 +143,49 @@ class ShopTrafficMailLog(models.Model):
 
     def __str__(self):
         return f"{self.day} sent {self.sent_at:%H:%M}"
+
+
+class ShopVisitor(models.Model):
+    """Har browser ka aik record (cookie se): naya vs wapas aane wala visitor pehchanne ke liye. Kabhi delete nahi hota."""
+    visitor_id = models.CharField(max_length=36, unique=True)
+    first_seen = models.DateField(db_index=True)
+    last_seen = models.DateField()
+    visits = models.PositiveIntegerField(default=1, help_text='Kitne alag dinon mein aaya')
+
+    class Meta:
+        verbose_name = 'Shop Visitor'
+        verbose_name_plural = 'Shop Visitors'
+
+    def __str__(self):
+        return f"{self.visitor_id[:8]} ({self.visits})"
+
+
+class ShopCartFollowup(models.Model):
+    """Abandoned cart par kis ne follow-up kiya (cart_key = session ka hash, asal session key nahi)."""
+    cart_key = models.CharField(max_length=40, unique=True)
+    contacted_by = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    contacted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Shop Cart Follow-up'
+        verbose_name_plural = 'Shop Cart Follow-ups'
+        ordering = ['-contacted_at']
+
+    def __str__(self):
+        return f"{self.cart_key[:8]} @ {self.contacted_at:%d %b %H:%M}"
+
+
+class ShopHiddenItem(models.Model):
+    """Dashboard list se chhupai gayi cheezein (jaise theek ho chuka 404 link)."""
+    kind = models.CharField(max_length=10)
+    key = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Shop Hidden Item'
+        verbose_name_plural = 'Shop Hidden Items'
+        unique_together = ('kind', 'key')
+
+    def __str__(self):
+        return f"{self.kind}: {self.key}"

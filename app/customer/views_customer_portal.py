@@ -917,7 +917,7 @@ def shop_home(request):
         from ..models import ShopBanner, VendorProfile
         banners = list(ShopBanner.live()[:8])
         for b in banners:
-            b.target = b.get_link()
+            b.target = reverse('shop_banner_click', args=[b.id]) if b.get_link() else ''   # click ginta hai phir asli link par jata hai
         live_vendors = Product.objects.filter(
             is_active=True, approval_status='approved', vendor__isnull=False
         ).values('vendor')
@@ -973,6 +973,31 @@ def shop_home(request):
 # ============================================
 # 2. PRODUCT DETAIL
 # ============================================
+
+def _price_products(items):
+    """Product cards ke liye batch price, discount aur stock lagata hai (related products wali hi logic)."""
+    items = list(items)
+    if not items:
+        return items
+    ids = [p.id for p in items]
+    best = {bp['product_id']: bp['best_price'] for bp in StockBatch.objects.filter(
+        product_id__in=ids, remaining_qty__gt=0, selling_price__gt=0
+    ).values('product_id').annotate(best_price=Min('selling_price'))}
+    stock = {s['product_id']: s['total_stock'] or 0 for s in Inventory.objects.filter(
+        product_id__in=ids).values('product_id').annotate(total_stock=Sum('stock'))}
+    for p in items:
+        base = best.get(p.id, p.price)
+        if p.discount_percentage and p.discount_percentage > 0:
+            p.original_price = base
+            p.price = base - base * (p.discount_percentage / Decimal('100'))
+            p.has_discount = True
+        else:
+            p.price = base
+            p.original_price = base
+            p.has_discount = False
+        p.available_stock = stock.get(p.id, 0)
+    return items
+
 
 def product_detail(request, pk):
     """Product detail page"""
@@ -1061,6 +1086,13 @@ def product_detail(request, pk):
             
             rp.available_stock = related_stock_map.get(rp.id, 0)
     
+    try:
+        from app.traffic_reco import bought_together_products
+        bought_together = _price_products(bought_together_products(product.id, limit=6))
+    except Exception as exc:
+        logger.warning(f"Bought-together error: {exc}")
+        bought_together = []
+
     cart = request.session.get('cart', {})
     recently_viewed = RecentlyViewed.get_recently_viewed(request, limit=8)
     recently_viewed = enrich_recently_viewed_with_prices(recently_viewed, cart=cart)
@@ -1088,6 +1120,7 @@ def product_detail(request, pk):
                                request.build_absolute_uri(request.path)),
         ),
         'related_products': related,
+        'bought_together': bought_together,
         'recently_viewed': recently_viewed,
         'cart_count': get_cart_count_value(request),
         'delivery_settings': delivery_settings,
@@ -1252,7 +1285,7 @@ def add_to_cart(request):
         cart_count = sum(item['quantity'] for item in cart.values())
 
         from app.shop_traffic import log_cart_add
-        log_cart_add(request, product, quantity)
+        log_cart_add(request, product, quantity, unit_price=final_price)
         
         return JsonResponse({
             'success': True,
@@ -1711,6 +1744,8 @@ def place_order(request):
 
         # ✅ Vendor ko naye order ki khabar
         store_orders.notify_vendor_new_order(order)
+        from app.shop_traffic import log_order
+        log_order(request, order)
         store_orders.email_new_order(order, request)   # vendor + admin ko email
         
         profile.record_successful_order()

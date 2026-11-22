@@ -3,6 +3,7 @@ from django.views.generic import RedirectView
 from django.contrib.auth import views as auth_views
 from . import views_frontend
 from .customer import views_customer_portal
+from . import shop_traffic_views
 from app.customer import views_customer_auth
 from app.customer import views_account_deletion
 from app.customer import views_vendor_portal
@@ -250,6 +251,8 @@ urlpatterns = [
     path('traffic-analytics/product-search/', views_frontend.traffic_product_search, name='traffic_product_search'),
     path('traffic-analytics/keyword-action/', views_frontend.traffic_keyword_action, name='traffic_keyword_action'),
     path('traffic-analytics/send-summary/', views_frontend.traffic_send_summary, name='traffic_send_summary'),
+    path('traffic-analytics/cart-followup/', views_frontend.traffic_cart_followup, name='traffic_cart_followup'),
+    path('traffic-analytics/hide-item/', views_frontend.traffic_hide_item, name='traffic_hide_item'),
     path('vendors/banners/add/', views_frontend.shop_banner_form, name='shop_banner_create'),
     path('vendors/banners/<int:pk>/edit/', views_frontend.shop_banner_form, name='shop_banner_edit'),
     path('vendors/banners/<int:pk>/toggle/', views_frontend.shop_banner_toggle, name='shop_banner_toggle'),
@@ -1111,6 +1114,7 @@ urlpatterns = [
      path('reports/business-ratios/', views_frontend.business_ratios_dashboard, name='business_ratios_dashboard'),
      
      path('shop/', views_customer_portal.shop_home, name='shop_home'),
+     path('shop/banner/<int:pk>/go/', shop_traffic_views.banner_click, name='shop_banner_click'),
      path('shop/product/<int:pk>/', views_customer_portal.product_detail, name='shop_product_detail'),
      path('shop/stores/', views_stores.store_list, name='store_list'),
      path('shop/stores/<int:pk>/', views_stores.store_detail, name='store_detail'),

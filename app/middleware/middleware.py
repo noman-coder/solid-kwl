@@ -125,6 +125,14 @@ class ShopTrafficMiddleware:
                 from app.shop_traffic import log_page
 
                 log_page(request)
+            elif request.method == "GET" and response.status_code == 404:
+                from app.shop_traffic import log_404
+
+                log_404(request)
+            if getattr(request, "_kc_vid_set", False):          # naye visitor ko 1 saal ki pehchan cookie
+                response.set_cookie(
+                    "kc_vid", request._kc_vid, max_age=365 * 24 * 3600, httponly=True,
+                    samesite="Lax", secure=request.is_secure())
         except Exception:
             logger.exception("Shop traffic middleware failed")
         return response

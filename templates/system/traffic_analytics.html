@@ -79,13 +79,24 @@
     </div>
     <div class="col-lg-4">
       <div class="ta-card">
-        <h6>Funnel: dekha → cart → order</h6>
+        <h6>Funnel: dekha → cart → checkout → order</h6>
         {% for f in funnel %}
         <div class="ta-funnel-row">
-          <div class="d-flex justify-content-between small"><span>{{ f.label }}</span><strong>{{ f.n }}</strong></div>
+          <div class="d-flex justify-content-between small"><span>{{ f.label }}</span>
+            <span><strong>{{ f.n }}</strong>{% if f.drop is not None %} <span class="ta-pill red">▼ {{ f.drop }}%</span>{% endif %}</span></div>
           <div class="ta-bar"><span style="width:{{ f.pct }}%"></span></div>
         </div>
         {% endfor %}
+        <div class="small mt-2 p-2 rounded" style="background:#fffbeb;color:#92400e">💡 {{ checkout.hint }}</div>
+      </div>
+      <div class="ta-card">
+        <h6>🔁 Naye vs Wapas aane wale</h6>
+        {% if visitor_mix.total %}
+        <div class="d-flex justify-content-between small"><span>Naye visitors</span><strong>{{ visitor_mix.new }} ({{ visitor_mix.new_pct }}%)</strong></div>
+        <div class="ta-bar mb-2"><span style="width:{{ visitor_mix.new_pct }}%"></span></div>
+        <div class="d-flex justify-content-between small"><span>Wapas aaye (loyal)</span><strong>{{ visitor_mix.returning }} ({{ visitor_mix.ret_pct }}%)</strong></div>
+        <div class="ta-bar"><span style="width:{{ visitor_mix.ret_pct }}%;background:linear-gradient(90deg,#10b981,#34d399)"></span></div>
+        {% else %}<span class="small text-muted">Abhi data nahi (cookie se pehchan banne mein kuch din lagte hain).</span>{% endif %}
       </div>
     </div>
   </div>
@@ -239,6 +250,111 @@
     </div>
   </div>
 
+  <div class="ta-card">
+    <h6>🛒 Abandoned Carts <small class="text-muted fw-normal">(cart mein dala, 1 ghante se zyada guzra, order nahi hua)</small></h6>
+    {% if abandoned %}<p class="small mb-2"><span class="ta-pill red">{{ abandoned|length }} carts</span>
+      <span class="ta-pill">Rs. {{ abandoned_value }} ka maal</span></p>{% endif %}
+    <div class="ta-scroll">
+    <table class="table table-sm ta-table align-middle mb-0">
+      <thead><tr><th>Customer</th><th>Maal</th><th class="text-end">Value</th><th>Kab</th>{% if can_followup %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+      {% for a in abandoned %}
+        <tr><td>{% if a.is_guest %}<span class="text-muted">Guest</span>{% else %}{{ a.name|default:"Customer" }}{% endif %}
+              {% if a.area %}<div class="small text-muted">{{ a.area }}</div>{% endif %}</td>
+          <td class="small">{{ a.items }}</td>
+          <td class="text-end">{% if a.value %}Rs. {{ a.value }}{% else %}—{% endif %}</td>
+          <td class="small text-nowrap">{{ a.last|date:"d M, H:i" }}</td>
+          {% if can_followup %}<td class="text-end text-nowrap">
+            {% if a.wa_url %}
+              <a href="{{ a.wa_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-success py-0 ta-follow" data-key="{{ a.key }}">💬 WhatsApp</a>
+            {% else %}<span class="small text-muted">phone nahi</span>{% endif %}
+            {% if a.followed %}<div class="small text-success">✔ {{ a.followed_by|default:"contacted" }} {{ a.followed_at|date:"d M H:i" }}</div>{% endif %}
+          </td>{% endif %}</tr>
+      {% empty %}
+        <tr><td colspan="5" class="text-center text-muted py-3">Koi abandoned cart nahi.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if abandoned and not can_followup %}<p class="small text-muted mt-2 mb-0">Customer ka phone aur WhatsApp follow-up ke liye "Manage Orders" permission chahiye.</p>{% endif %}
+  </div>
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="ta-card">
+        <h6>🖼️ Banner Performance <small class="text-muted fw-normal">(shop home {{ banners.home_views }} baar khuli)</small></h6>
+        <table class="table table-sm ta-table mb-0">
+          <thead><tr><th>Banner</th><th class="text-end">Clicks</th><th class="text-end">Log</th><th class="text-end">CTR</th></tr></thead>
+          <tbody>
+          {% for b in banners.rows %}
+            <tr><td>{{ b.title }}{% if not b.active %} <span class="ta-pill">off</span>{% endif %}</td>
+              <td class="text-end fw-bold">{{ b.clicks }}</td><td class="text-end">{{ b.people }}</td>
+              <td class="text-end">{% if b.ctr is None %}—{% else %}{{ b.ctr }}%{% endif %}</td></tr>
+          {% empty %}
+            <tr><td colspan="4" class="text-center text-muted py-3">Koi banner nahi.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="ta-card">
+        <h6>🏪 Store Performance</h6>
+        <div class="ta-scroll">
+        <table class="table table-sm ta-table mb-0">
+          <thead><tr><th>Store</th><th class="text-end">Page</th><th class="text-end">Products</th><th class="text-end">Cart</th><th class="text-end">Orders</th><th class="text-end">Revenue</th></tr></thead>
+          <tbody>
+          {% for r in stores %}
+            <tr><td>{{ r.name }}</td><td class="text-end">{{ r.page_views }}</td><td class="text-end">{{ r.product_views }}</td>
+              <td class="text-end">{{ r.cart_adds }}</td><td class="text-end fw-bold">{{ r.orders }}</td><td class="text-end">Rs. {{ r.revenue }}</td></tr>
+          {% empty %}
+            <tr><td colspan="6" class="text-center text-muted py-3">Abhi store ka data nahi.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="ta-card">
+        <h6>🔗 Broken Links (404)</h6>
+        <p class="small text-muted mb-2">Jo page customers ko nahi mile. Link theek kar ke "Theek ho gaya" dabayein.</p>
+        <div class="ta-scroll">
+        <table class="table table-sm ta-table mb-0">
+          <thead><tr><th>Page</th><th class="text-end">Baar</th><th>Kahan se aaye</th>{% if can_manage %}<th></th>{% endif %}</tr></thead>
+          <tbody>
+          {% for r in broken %}
+            <tr><td class="small text-break">{{ r.path }}<div class="text-muted">{{ r.last|date:"d M H:i" }}</div></td>
+              <td class="text-end"><span class="ta-pill red">{{ r.hits }}</span></td><td class="small">{{ r.ref }}</td>
+              {% if can_manage %}<td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary py-0 ta-hide" data-path="{{ r.path }}">Theek ho gaya</button></td>{% endif %}</tr>
+          {% empty %}
+            <tr><td colspan="4" class="text-center text-muted py-3">Koi broken link nahi mila.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="ta-card">
+        <h6>🤝 Aksar saath khareedi jane wali jodiyan <small class="text-muted fw-normal">(pichle 90 din)</small></h6>
+        <p class="small text-muted mb-2">Bundle/combo offer ka idea. Ye jodiyan product page par "Aksar saath khareeda jata hai" mein bhi khud dikhti hain.</p>
+        <table class="table table-sm ta-table mb-0">
+          <tbody>
+          {% for p in pairs %}
+            <tr><td>{{ p.a }} <span class="text-muted">+</span> {{ p.b }}</td><td class="text-end"><span class="ta-pill green">{{ p.count }} orders</span></td></tr>
+          {% empty %}
+            <tr><td class="text-center text-muted py-3">Abhi kam orders hain, jodiyan banne mein waqt lagega.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <p class="text-muted small mb-0">
     Raw data 90 din tak rehta hai, us ke baad daily summary mein save ho jata hai (summary kabhi delete nahi hoti).
     Bots aur staff ke views count nahi hote.{% if tracking_since %} Tracking shuru: {{ tracking_since|date:"d M Y" }}.{% endif %}
@@ -297,6 +413,22 @@
     mail.disabled = true;
     post("{% url 'traffic_send_summary' %}").then(function (j) { alert(j.message); })
       .catch(function () { alert('Email nahi gayi'); }).then(function () { mail.disabled = false; });
+  });
+
+  document.querySelectorAll('.ta-follow').forEach(function (a) {
+    a.addEventListener('click', function () {
+      fetch("{% url 'traffic_cart_followup' %}", { method: 'POST', credentials: 'same-origin', keepalive: true,
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({ cart_key: a.dataset.key }) });
+      a.textContent = '✔ Bhej diya';
+    });
+  });
+  document.querySelectorAll('.ta-hide').forEach(function (b) {
+    b.addEventListener('click', function () {
+      post("{% url 'traffic_hide_item' %}", { kind: '404', key: b.dataset.path }).then(function (j) {
+        if (j.success) b.closest('tr').remove();
+      });
+    });
   });
 
   var modalEl = document.getElementById('taModal');
