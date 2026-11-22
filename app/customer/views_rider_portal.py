@@ -60,11 +60,11 @@ def rider_login_required(view_func):
             return redirect('rider_login')
         profile = getattr(request.user, 'rider_profile', None)
         if profile is None:
-            messages.error(request, '❌ Ye page sirf riders ke liye hai')
+            messages.error(request, '❌ This page is for riders only')
             return redirect('shop_home')
         if not profile.is_active:
             logout(request)
-            messages.error(request, '❌ Aap ka rider account band hai. Admin se rabta karein.')
+            messages.error(request, '❌ Your rider account is disabled. Please contact the admin.')
             return redirect('rider_login')
         return view_func(request, *args, **kwargs)
     return wrapper
@@ -177,11 +177,11 @@ def _assign(order, di, rider, user):
     di.save()
     _track(order, 'rider_assigned', 'Rider Assigned', f'Rider: {rider.name} ({rider.phone})', user, rider)
     store_orders._notify(store_orders._customer_user(order),
-                         f'🏍️ Order #{order.order_no}: rider mil gaya',
-                         f'Rider {rider.name} ({rider.phone}) aap ka order lene aa raha hai.',
+                         f'🏍️ Order #{order.order_no}: rider assigned',
+                         f'Rider {rider.name} ({rider.phone}) is on the way to pick up your order.',
                          f'/shop/order/{order.id}/', 'info')
-    store_orders._notify(_vendor_user(order), f'🏍️ Order #{order.order_no}: rider {rider.name} aa raha hai',
-                         f'{rider.name} ({rider.phone}) maal lene aa raha hai.',
+    store_orders._notify(_vendor_user(order), f'🏍️ Order #{order.order_no}: rider {rider.name} is coming',
+                         f'{rider.name} ({rider.phone}) is on the way to pick up the order.',
                          '/shop/vendor/orders/?tab=active', 'info')
 
 
@@ -203,14 +203,14 @@ def rider_login(request):
         phone = normalize_phone(phone_raw)
         key = f"rider_login:{phone}:{get_client_ip(request) or ''}"
         if cache.get(key, 0) >= LOGIN_MAX_ATTEMPTS:
-            messages.error(request, '🔒 Bohat zyada koshishen. 10 minute baad dobara try karein.')
+            messages.error(request, '🔒 Too many attempts. Please try again after 10 minutes.')
             return redirect('rider_login')
 
         rider = RiderProfile.objects.select_related('user').filter(phone=phone, is_active=True).first()
         user = authenticate(request, username=rider.user.username, password=password) if rider else None
         if not user:
             cache.set(key, cache.get(key, 0) + 1, LOGIN_LOCK_SECONDS)
-            messages.error(request, '❌ Phone ya password ghalat hai')
+            messages.error(request, '❌ Wrong phone or password')
             return redirect('rider_login')
 
         cache.delete(key)
@@ -290,8 +290,8 @@ def rider_toggle_online(request):
     rider.is_online = not rider.is_online
     rider.last_seen_at = now()
     rider.save(update_fields=['is_online', 'last_seen_at'])
-    messages.success(request, '🟢 Aap online hain. Naye orders ke offers dikhenge.' if rider.is_online
-                     else '⚫ Aap offline hain. Naye offers nahi aayenge.')
+    messages.success(request, '🟢 You are online. You will see new order offers.' if rider.is_online
+                     else '⚫ You are offline. You will not receive new offers.')
     return redirect('rider_home')
 
 
@@ -315,14 +315,14 @@ def rider_accept_order(request, pk):
         messages.error(request, '❌ Pehle online hon.')
         return redirect('rider_home')
     if DeliveryInfo.objects.filter(rider=rider, status__in=ACTIVE_STATUSES).count() >= MAX_ACTIVE_ORDERS:
-        messages.error(request, f'❌ Aap ke paas pehle se {MAX_ACTIVE_ORDERS} orders hain. Pehle unhein poora karein.')
+        messages.error(request, f'❌ You already have {MAX_ACTIVE_ORDERS} orders. Please complete them first.')
         return redirect('rider_home')
 
     try:
         with transaction.atomic():
             order = SaleOrder.objects.select_for_update().filter(pk=pk, status='ready').first()
             if not order:
-                raise store_orders.OrderActionError('Ye order ab available nahi.')
+                raise store_orders.OrderActionError('This order is no longer available.')
             di, _ = DeliveryInfo.objects.select_for_update().get_or_create(sale_order=order)
             if di.rider_id and di.status != 'cancelled':
                 raise store_orders.OrderActionError('Ye order kisi aur rider ne le liya.')
@@ -331,7 +331,7 @@ def rider_accept_order(request, pk):
         messages.error(request, f'❌ {exc}')
         return redirect('rider_home')
 
-    messages.success(request, f'✅ Order #{order.order_no} aap ka ho gaya. Ab {store_orders.store_name(order.vendor_id)} se maal uthayein.')
+    messages.success(request, f'✅ Order #{order.order_no} is yours. Now pick up the order from {store_orders.store_name(order.vendor_id)}.')
     return redirect('rider_home')
 
 
@@ -341,7 +341,7 @@ def rider_order_action(request, pk, action):
     """action: pickup | deliver"""
     rider = request.user.rider_profile
     if action not in ('pickup', 'deliver'):
-        messages.error(request, '❌ Ghalat action.')
+        messages.error(request, '❌ Invalid action.')
         return redirect('rider_home')
 
     try:
@@ -353,38 +353,38 @@ def rider_order_action(request, pk, action):
 
             if action == 'pickup':
                 if di.status != 'assigned' or order.status != 'ready':
-                    raise store_orders.OrderActionError('Ye order ab "maal lene" ke liye tayyar nahi.')
+                    raise store_orders.OrderActionError('This order is no longer ready for pickup.')
                 di.status = 'picked_up'
                 di.picked_up_at = now()
                 di.save()
                 _track(order, 'out_for_delivery', 'Out for Delivery',
-                       f'Rider {rider.name} ne {shop} se maal le liya.', request.user, rider)
-                store_orders._notify(cust, f'🛵 Order #{order.order_no} raaste mein hai',
-                                     f'Rider {rider.name} ({rider.phone}) aap ka order le kar nikal chuka hai.',
+                       f'Rider {rider.name} picked up the order from {shop}.', request.user, rider)
+                store_orders._notify(cust, f'🛵 Order #{order.order_no} is on the way',
+                                     f'Rider {rider.name} ({rider.phone}) has left with your order.',
                                      f'/shop/order/{order.id}/', 'info')
-                messages.success(request, f'📦 Order #{order.order_no}: maal le liya. Ab customer ke paas jayein.')
+                messages.success(request, f'📦 Order #{order.order_no}: picked up. Now go to the customer.')
             else:
                 if di.status not in ('picked_up', 'in_transit') or order.status != 'ready':
-                    raise store_orders.OrderActionError('Pehle "Maal le liya" dabayein.')
+                    raise store_orders.OrderActionError('Press "Picked up" first.')
                 total = store_orders.order_payable_total(order)
                 is_cod = (order.payment_method or 'cod') == 'cod'
                 di.status = 'delivered'
                 di.delivered_at = now()
                 di.rider_fee = rider.per_delivery_fee
                 di.cash_collected = total if is_cod else Decimal('0')
-                di.delivery_notes = (f'COD cash rider ne liya: Rs. {total:,.0f}' if is_cod
-                                     else 'Online payment - cash nahi liya')
+                di.delivery_notes = (f'COD cash collected by rider: Rs. {total:,.0f}' if is_cod
+                                     else 'Online payment - no cash collected')
                 di.save()
                 store_orders.apply_vendor_action(order, 'delivered', user=request.user)
                 _track(order, 'delivered', 'Delivered',
-                       f'Rider {rider.name} ne order deliver kar diya.', request.user, rider)
-                store_orders._notify(_vendor_user(order), f'🎉 Order #{order.order_no} deliver ho gaya',
-                                     f'Rider {rider.name} ne deliver kar diya.'
-                                     + (f' COD Rs. {total:,.0f} rider ke paas hai.' if is_cod else ''),
+                       f'Rider {rider.name} delivered the order.', request.user, rider)
+                store_orders._notify(_vendor_user(order), f'🎉 Order #{order.order_no} delivered',
+                                     f'Rider {rider.name} delivered it.'
+                                     + (f' COD Rs. {total:,.0f} is with the rider.' if is_cod else ''),
                                      '/shop/vendor/orders/?tab=done', 'success')
-                msg = f'🎉 Order #{order.order_no} deliver ho gaya. Kamai: Rs. {rider.per_delivery_fee:,.0f}.'
+                msg = f'🎉 Order #{order.order_no} delivered. Earning: Rs. {rider.per_delivery_fee:,.0f}.'
                 if is_cod:
-                    msg += f' Customer se Rs. {total:,.0f} cash liya — admin ko jama karwayein.'
+                    msg += f' You collected Rs. {total:,.0f} cash from the customer — deposit it with the admin.'
                 messages.success(request, msg)
     except store_orders.OrderActionError as exc:
         messages.error(request, f'❌ {exc}')
@@ -405,19 +405,19 @@ def vendor_assign_rider(request, pk):
         with transaction.atomic():
             order = get_object_or_404(SaleOrder.objects.select_for_update(), pk=pk, vendor=vendor)
             if order.status != 'ready':
-                raise store_orders.OrderActionError('Rider sirf "Ready" order par chun sakte hain.')
+                raise store_orders.OrderActionError('A rider can be chosen only for a "Ready" order.')
             di, _ = DeliveryInfo.objects.select_for_update().get_or_create(sale_order=order)
             if di.status in ('picked_up', 'in_transit', 'delivered'):
-                raise store_orders.OrderActionError('Rider maal utha chuka hai, ab badal nahi sakte.')
+                raise store_orders.OrderActionError('The rider has already picked up the order, so it cannot be changed.')
             _assign(order, di, rider, request.user)
-            store_orders._notify(rider.user, f'🏍️ Naya order #{order.order_no}',
-                                 f'{store_orders.store_name(order.vendor_id)} se maal uthana hai.',
+            store_orders._notify(rider.user, f'🏍️ New order #{order.order_no}',
+                                 f'Pick up the order from {store_orders.store_name(order.vendor_id)}.',
                                  reverse('rider_home'), 'info')
     except store_orders.OrderActionError as exc:
         messages.error(request, f'❌ {exc}')
         return redirect(f"{reverse('vendor_orders')}?tab=active")
 
-    messages.success(request, f'🏍️ Order #{order.order_no}: rider {rider.name} ko de diya.')
+    messages.success(request, f'🏍️ Order #{order.order_no}: assigned to rider {rider.name}.')
     return redirect(f"{reverse('vendor_orders')}?tab=active")
 
 
@@ -431,7 +431,7 @@ def _admin_only(view):
         if not request.user.is_authenticated:
             return redirect(f"{settings.LOGIN_URL}?next={request.get_full_path()}")
         if not request.user.is_superuser:
-            messages.error(request, '❌ Sirf admin riders manage kar sakta hai.')
+            messages.error(request, '❌ Only the admin can manage riders.')
             return redirect('shop_home')
         return view(request, *args, **kwargs)
     return wrapper
@@ -456,9 +456,9 @@ def rider_manage(request):
             vehicle = request.POST.get('vehicle', '').strip()[:50]
             fee = _money(request.POST.get('fee', '50'))
             if not name or not phone_raw or len(password) < 6 or fee is None:
-                messages.error(request, '❌ Naam, phone, fee aur kam az kam 6 harf ka password likhein.')
+                messages.error(request, '❌ Enter name, phone, fee and a password of at least 6 characters.')
             elif not is_valid_phone(phone_raw):
-                messages.error(request, '❌ Phone number sahi nahi.')
+                messages.error(request, '❌ Invalid phone number.')
             else:
                 phone = normalize_phone(phone_raw)
                 username = 'rider_' + phone.replace('+', '')
@@ -469,7 +469,7 @@ def rider_manage(request):
                                                     per_delivery_fee=fee)
                     messages.success(request, f'✅ Rider {name} bana diya. Login: {phone}')
                 except IntegrityError:
-                    messages.error(request, '❌ Is phone ka rider pehle se maujood hai.')
+                    messages.error(request, '❌ A rider with this phone number already exists.')
         elif action == 'toggle':
             r = get_object_or_404(RiderProfile, pk=request.POST.get('rider_id') or 0)
             r.is_active = not r.is_active
@@ -481,11 +481,11 @@ def rider_manage(request):
             r = get_object_or_404(RiderProfile, pk=request.POST.get('rider_id') or 0)
             pw = request.POST.get('password', '')
             if len(pw) < 6:
-                messages.error(request, '❌ Password kam az kam 6 harf ka ho.')
+                messages.error(request, '❌ Password must be at least 6 characters.')
             else:
                 r.user.set_password(pw)
                 r.user.save()
-                messages.success(request, f'🔑 {r.name} ka password badal diya.')
+                messages.success(request, f'🔑 Password changed for {r.name}.')
         return redirect('rider_manage')
 
     riders = list(RiderProfile.objects.all())
@@ -520,24 +520,24 @@ def rider_detail(request, pk):
         if action == 'fee':
             fee = _money(request.POST.get('fee'))
             if fee is None:
-                messages.error(request, '❌ Fee sahi nahi.')
+                messages.error(request, '❌ Invalid fee.')
             else:
                 rider.per_delivery_fee = fee
                 rider.save(update_fields=['per_delivery_fee'])
-                messages.success(request, f'✅ Fee Rs. {fee:,.0f} per delivery kar di (naye orders par lagu).')
+                messages.success(request, f'✅ Fee set to Rs. {fee:,.0f} per delivery (applies to new orders).')
         elif action in ('cash_in', 'payout'):
             amount = _money(request.POST.get('amount'))
             bal = rider_balances(rider)
             limit = bal['cash_in_hand'] if action == 'cash_in' else bal['due']
             if not amount or amount <= 0:
-                messages.error(request, '❌ Raqam sahi likhein.')
+                messages.error(request, '❌ Enter a valid amount.')
             elif amount > limit:
-                messages.error(request, f'❌ Raqam zyada hai. Zyada se zyada Rs. {limit:,.0f}.')
+                messages.error(request, f'❌ Amount is too high. Maximum is Rs. {limit:,.0f}.')
             else:
                 RiderSettlement.objects.create(rider=rider, kind=action, amount=amount,
                                                note=request.POST.get('note', '').strip()[:200],
                                                created_by=request.user)
-                messages.success(request, f'✅ {"Cash jama" if action == "cash_in" else "Kamai ada"}: Rs. {amount:,.0f} ({rider.name})')
+                messages.success(request, f'✅ {"Cash deposited" if action == "cash_in" else "Earnings paid"}: Rs. {amount:,.0f} ({rider.name})')
         return redirect('rider_detail', pk=rider.pk)
 
     deliveries = (rider.deliveries.filter(status='delivered', sale_order__isnull=False)

@@ -737,7 +737,7 @@
             <input type="text" 
                    id="guestName" 
                    class="chat-guest-input" 
-                   placeholder="Aapka naam..."
+                   placeholder="Your name..."
                    maxlength="100">
             <input type="tel" 
                    id="guestPhone" 
@@ -1202,7 +1202,7 @@
                 if (tempEl) tempEl.remove();
                 
                 if (typeof showVoiceToast === 'function') {
-                    showVoiceToast(data.message || 'Message send nahi hua');
+                    showVoiceToast(data.message || 'Message could not be sent');
                 }
             }
         })

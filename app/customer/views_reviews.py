@@ -49,10 +49,10 @@ def rate_order(request, order_id):
     order = get_object_or_404(SaleOrder, id=order_id, customer=customer)
 
     if order.status not in REVIEWABLE:
-        messages.error(request, '❌ Rating sirf deliver hone ke baad de sakte hain.')
+        messages.error(request, '❌ You can rate only after the order is delivered.')
         return redirect('order_detail_customer', order_id=order.id)
     if OrderReview.objects.filter(sale_order=order).exists():
-        messages.info(request, 'Aap is order ki rating de chuke hain.')
+        messages.info(request, 'You have already rated this order.')
         return redirect('order_detail_customer', order_id=order.id)
 
     di = DeliveryInfo.objects.filter(sale_order=order, status='delivered', rider__isnull=False).select_related('rider').first()
@@ -61,7 +61,7 @@ def rate_order(request, order_id):
     vendor_stars = _stars(request.POST.get('vendor_rating')) if order.vendor_id else None
     rider_stars = _stars(request.POST.get('rider_rating')) if rider else None
     if not vendor_stars and not rider_stars:
-        messages.error(request, '❌ Kam az kam ek rating (⭐) chunein.')
+        messages.error(request, '❌ Please choose at least one rating (⭐).')
         return redirect('order_detail_customer', order_id=order.id)
 
     try:
@@ -72,7 +72,7 @@ def rate_order(request, order_id):
                 rider_rating=rider_stars, rider_comment=request.POST.get('rider_comment', '').strip()[:300],
             )
     except IntegrityError:
-        messages.info(request, 'Aap is order ki rating de chuke hain.')
+        messages.info(request, 'You have already rated this order.')
         return redirect('order_detail_customer', order_id=order.id)
 
     # Store aur rider ko khabar
@@ -80,16 +80,16 @@ def rate_order(request, order_id):
         if vendor_stars:
             vp = VendorProfile.objects.filter(vendor_id=order.vendor_id).select_related('user').first()
             store_orders._notify(vp.user if vp else None, f'⭐ Order #{order.order_no}: {vendor_stars}/5',
-                                 request.POST.get('vendor_comment', '').strip()[:200] or 'Customer ne aap ke store ko rating di.',
+                                 request.POST.get('vendor_comment', '').strip()[:200] or 'The customer rated your store.',
                                  '/shop/vendor/', 'success' if vendor_stars >= 4 else 'warning')
         if rider_stars:
             store_orders._notify(rider.user, f'⭐ Order #{order.order_no}: {rider_stars}/5',
-                                 request.POST.get('rider_comment', '').strip()[:200] or 'Customer ne aap ko rating di.',
+                                 request.POST.get('rider_comment', '').strip()[:200] or 'The customer rated you.',
                                  '/shop/rider/earnings/', 'success' if rider_stars >= 4 else 'warning')
     except Exception as exc:
         logger.error("Review notify error: %s", exc)
 
-    messages.success(request, '⭐ Rating dene ka shukriya!')
+    messages.success(request, '⭐ Thank you for your rating!')
     return redirect('order_detail_customer', order_id=order.id)
 
 

@@ -59,7 +59,7 @@
   <div class="pf-card">
     <div class="pf-head">
       <h3><i class="bi bi-boxes"></i> {{ page_title }}</h3>
-      <p>Ek saath kai products add karein. Shop {{ commission_percent|floatformat:"-2" }}% commission rakhta hai; baaqi aap ka.</p>
+      <p>Add several products at once. The shop keeps {{ commission_percent|floatformat:"-2" }}% commission; the rest is yours.</p>
     </div>
     <div class="pf-body">
 
@@ -205,7 +205,7 @@
         var btn = document.getElementById('masterSave');
         var name = input.value.trim();
         err.textContent = '';
-        if (name.length < 2) { err.textContent = LABELS[curKind] + ' ka naam likhein.'; input.focus(); return; }
+        if (name.length < 2) { err.textContent = 'Enter the ' + LABELS[curKind] + ' name.'; input.focus(); return; }
 
         btn.disabled = true;
         fetch('/shop/vendor/api/create/' + curKind + '/', {
@@ -227,11 +227,11 @@
             });
             curRow.querySelector('.sel-' + curKind).value = d.id;
             curRow.querySelector('[data-hint="' + curKind + '"]').textContent = d.existed
-                ? '✔ "' + d.name + '" pehle se maujood tha, select kar liya'
+                ? '✔ "' + d.name + '" already existed and has been selected'
                 : '✅ "' + d.name + '" add ho gaya';
             modal.hide();
         })
-        .catch(function () { btn.disabled = false; err.textContent = 'Network error, dobara koshish karein.'; });
+        .catch(function () { btn.disabled = false; err.textContent = 'Network error, please try again.'; });
     }
 
     document.getElementById('masterSave').addEventListener('click', saveMaster);

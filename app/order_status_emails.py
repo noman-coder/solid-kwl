@@ -77,9 +77,9 @@ def _send_status_email(order_id, email_status, dedupe_key):
                 from .customer.store_orders import store_name
                 store = store_name(order.vendor_id)
             if email_status == 'cancelled' and order.reject_reason:
-                note = f'Wajah: {order.reject_reason}'
+                note = f'Reason: {order.reject_reason}'
             elif email_status == 'confirmed' and order.prep_minutes:
-                note = f'Tayyar hone mein taqreeban {order.prep_minutes} minute.'
+                note = f'Ready in about {order.prep_minutes} minutes.'
 
             base = _site_url()
             tracking = f'{base}/shop/order/{order.id}/' if base else None

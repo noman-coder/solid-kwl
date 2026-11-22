@@ -11,17 +11,17 @@ def get_payment_options():
     """Returns (methods, numbers).
     methods = [(value, label, description), ...]   numbers = {'jazzcash': '03..', ...}"""
     company = CompanyInfo.objects.first()
-    methods = [('cod', '💵 Cash on Delivery', 'Ghar par cash dein')]
+    methods = [('cod', '💵 Cash on Delivery', 'Pay cash at your doorstep')]
     numbers = {}
 
     jazz = ((getattr(company, 'jazzcash_number', '') or '').strip()) if company else ''
     easy = ((getattr(company, 'easypaisa_number', '') or '').strip()) if company else ''
 
     if jazz:
-        methods.append(('jazzcash', '📱 JazzCash', 'Company ke JazzCash number par payment bhejein'))
+        methods.append(('jazzcash', '📱 JazzCash', 'Send the payment to the company JazzCash number'))
         numbers['jazzcash'] = jazz
     if easy:
-        methods.append(('easypaisa', '📱 EasyPaisa', 'Company ke EasyPaisa number par payment bhejein'))
+        methods.append(('easypaisa', '📱 EasyPaisa', 'Send the payment to the company EasyPaisa number'))
         numbers['easypaisa'] = easy
     return methods, numbers
 

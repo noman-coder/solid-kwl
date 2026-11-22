@@ -1,4 +1,4 @@
-{# Customer location popup. Sirf tab dikhta hai jab view ne location_prompt=True bheja ho (location abhi maloom nahi). #}
+{# Customer location popup. Shown only when the view sends location_prompt=True (location not known yet). #}
 {% if location_prompt %}
 {% csrf_token %}
 <style>
@@ -7,9 +7,8 @@
   .lp-box { background: #fff; width: 100%; max-width: 440px; border-radius: 22px; padding: 22px 20px 18px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
   @media (min-width: 600px) { .lp-ov { align-items: center; } }
   .lp-ico { width: 54px; height: 54px; border-radius: 50%; background: #eaf2ff; color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 26px; margin: 0 auto 10px; }
-  .lp-ur { direction: rtl; text-align: right; line-height: 2; font-size: 17px;
-           font-family: 'Jameel Noori Nastaleeq','Noto Nastaliq Urdu','Noto Naskh Arabic','Segoe UI',Tahoma,serif; }
-  .lp-ur h5 { font-weight: 700; font-size: 21px; margin: 0 0 4px; text-align: center; }
+  .lp-txt { line-height: 1.6; font-size: 16px; }
+  .lp-txt h5 { font-weight: 700; font-size: 20px; margin: 0 0 8px; text-align: center; }
   .lp-btns { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
   .lp-btns button { border: 0; border-radius: 24px; padding: 12px; font-weight: 700; font-size: 16px; cursor: pointer; }
   .lp-allow { background: linear-gradient(135deg,#2563eb,#7c3aed); color: #fff; }
@@ -17,15 +16,15 @@
   .lp-err { display: none; margin-top: 10px; padding: 9px 12px; border-radius: 12px; background: #fff3cd; color: #856404; font-size: 15px; }
 </style>
 <div class="lp-ov" id="lpOv" role="dialog" aria-modal="true" aria-labelledby="lpTitle">
-  <div class="lp-box lp-ur">
+  <div class="lp-box lp-txt">
     <div class="lp-ico"><i class="bi bi-geo-alt-fill"></i></div>
-    <h5 id="lpTitle">اپنے قریب ترین اسٹورز دیکھیں</h5>
-    <p style="margin:0 0 4px;">ہم آپ کی لوکیشن اس لیے مانگ رہے ہیں تاکہ آپ کو <b>آپ کے قریب کے اسٹورز</b> پہلے دکھائے جا سکیں اور آپ قریبی اسٹور سے جلدی اور کم خرچ میں خریداری کر سکیں۔</p>
-    <p style="margin:0;font-size:15px;color:#555;">آپ کی لوکیشن کسی اسٹور یا دوسرے گاہک کو نہیں دکھائی جاتی۔ آپ اجازت نہ بھی دیں تو دکانیں عام طور پر دیکھ سکتے ہیں۔</p>
+    <h5 id="lpTitle">See stores near you</h5>
+    <p style="margin:0 0 4px;">We ask for your location so we can show <b>stores near you</b> first, and you can shop from a nearby store faster and with lower delivery cost.</p>
+    <p style="margin:0;font-size:15px;color:#555;">Your location is never shown to any store or other customer. You can still browse all stores if you do not allow it.</p>
     <div class="lp-err" id="lpErr"></div>
     <div class="lp-btns">
-      <button type="button" class="lp-allow" id="lpAllow">اجازت دیں، قریبی اسٹورز دکھائیں</button>
-      <button type="button" class="lp-later" id="lpLater">ابھی نہیں</button>
+      <button type="button" class="lp-allow" id="lpAllow">Allow and show nearby stores</button>
+      <button type="button" class="lp-later" id="lpLater">Not now</button>
     </div>
   </div>
 </div>
@@ -54,11 +53,11 @@
         body: new URLSearchParams({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }).toString()
       }).then(function (r) { return r.json(); }).then(function (d) {
         if (d && d.success) { close(); window.location.reload(); }
-        else { showErr('لوکیشن محفوظ نہیں ہو سکی، دوبارہ کوشش کریں۔'); btn.disabled = false; }
-      }).catch(function () { showErr('انٹرنیٹ کا مسئلہ ہے، دوبارہ کوشش کریں۔'); btn.disabled = false; });
+        else { showErr('Could not save your location, please try again.'); btn.disabled = false; }
+      }).catch(function () { showErr('Network problem, please try again.'); btn.disabled = false; });
     }, function (e) {
-      if (e && e.code === 1) { snooze(7); close(); }       // customer ne mana kar diya: 7 din tak dobara nahi poochna
-      else { showErr('لوکیشن حاصل نہیں ہو سکی۔ فون کا GPS آن کر کے دوبارہ کوشش کریں۔'); btn.disabled = false; }
+      if (e && e.code === 1) { snooze(7); close(); }       // customer declined: do not ask again for 7 days
+      else { showErr('Could not get your location. Turn on GPS and try again.'); btn.disabled = false; }
     }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 });
   });
 })();

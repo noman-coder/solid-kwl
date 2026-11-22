@@ -25,18 +25,18 @@ def parse_coords(request):
         try:
             data = json.loads(request.body or b'{}')
         except (ValueError, TypeError):
-            return None, None, None, 'Location ka data sahi nahi'
+            return None, None, None, 'Invalid location data'
     else:
         data = request.POST
     try:
         lat = float(data.get('lat'))
         lng = float(data.get('lng'))
     except (TypeError, ValueError):
-        return None, None, None, 'Location ka data sahi nahi'
+        return None, None, None, 'Invalid location data'
     if not (math.isfinite(lat) and math.isfinite(lng)) or not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
-        return None, None, None, 'Location ka data sahi nahi'
+        return None, None, None, 'Invalid location data'
     if lat == 0 and lng == 0:
-        return None, None, None, 'Location ka data sahi nahi'
+        return None, None, None, 'Invalid location data'
     acc = data.get('accuracy')
     try:
         acc = float(acc) if acc not in (None, '') else None

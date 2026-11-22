@@ -49,7 +49,7 @@
   <div class="ss-card">
     <div class="ss-head">
       <h3><i class="bi bi-shop"></i> Store Settings</h3>
-      <p>Ye aap ke store ki wo page ha jo customer dekhte hain.</p>
+      <p>This is the store page that customers see.</p>
     </div>
     <div class="ss-body">
       <form method="post" enctype="multipart/form-data">
@@ -57,12 +57,12 @@
 
         <div class="ss-sec">Store category</div>
         <div class="ss-group">
-          <label>Aap ka store kis type ka hai?</label>
+          <label>What type of store do you have?</label>
           <select name="store_category">
             <option value="">-- Select --</option>
             {% for c in store_categories %}<option value="{{ c.id }}" {% if profile.store_category_id == c.id %}selected{% endif %}>{{ c.icon }} {{ c.name }}</option>{% endfor %}
           </select>
-          <div class="ss-help">Customer stores page par isi type se aap ko dhoondhta hai.</div>
+          <div class="ss-help">Customers find you on the stores page by this type.</div>
         </div>
 
         <div class="ss-sec">Store status</div>
@@ -71,15 +71,15 @@
           <label><input type="radio" name="store_status" value="busy" {% if profile.store_status == 'busy' %}checked{% endif %}><span>🟠 Busy</span></label>
           <label><input type="radio" name="store_status" value="closed" {% if profile.store_status == 'closed' %}checked{% endif %}><span>🔴 Closed</span></label>
         </div>
-        <div class="ss-help">Closed: customer order nahi de sakta. Busy: order milte hain, par der ho sakti ha.
-          Abhi customer ko aap ka store <b>{% if profile.is_open_now %}khula{% else %}band{% endif %}</b> nazar aa raha ha.</div>
+        <div class="ss-help">Closed: customers cannot place orders. Busy: you still receive orders, but delivery may be slower.
+          Right now customers see your store as <b>{% if profile.is_open_now %}open{% else %}closed{% endif %}</b>.</div>
 
         <div class="ss-sec">Timings</div>
         <div class="ss-row">
           <div class="ss-group"><label>Opens at</label><input type="time" name="opens_at" value="{{ profile.opens_at|time:'H:i' }}"></div>
           <div class="ss-group"><label>Closes at</label><input type="time" name="closes_at" value="{{ profile.closes_at|time:'H:i' }}"></div>
         </div>
-        <div class="ss-help" style="margin-top:-8px;">Dono khali = status ke mutabiq hamesha khula. Raat ka time bhi chalta ha (jaise 18:00 se 02:00).</div>
+        <div class="ss-help" style="margin-top:-8px;">Leave both empty = always open according to the status. Overnight hours also work (e.g. 18:00 to 02:00).</div>
 
         <div class="ss-sec">Delivery</div>
         <div class="ss-row">
@@ -103,20 +103,20 @@
             {% endfor %}
           </div>
           {% endfor %}
-          <label style="margin-top:10px">Aur areas (list mein nahi hain to)</label>
-          <textarea name="delivery_areas_extra" rows="2" maxlength="500" placeholder="Jaise: Chak 45, Basti Maluk">{{ area_extra }}</textarea>
-          <div class="ss-help">Apne deliver karne wale areas par tick lagayein. Customer ka "Deliver to" area in mein ho to aap ka store usay nazar aata hai.</div>
+          <label style="margin-top:10px">More areas (if not in the list)</label>
+          <textarea name="delivery_areas_extra" rows="2" maxlength="500" placeholder="e.g. Chak 45, Basti Maluk">{{ area_extra }}</textarea>
+          <div class="ss-help">Tick the areas you deliver to. If the customer's "Deliver to" area is among them, they will see your store.</div>
           {% else %}
-          <textarea name="delivery_areas" rows="2" maxlength="1000" placeholder="Jaise: Gulberg, DHA, Johar Town">{{ profile.delivery_areas }}</textarea>
-          <div class="ss-help">Wo areas jahan aap deliver karte hain, comma se alag. Customer ka "Deliver to" area in mein ho to aap ka store usay nazar aata hai.
-            Khali chhoden to store sirf aap ke shehar ({{ profile.city|default:"-" }}) ke customers ko nazar aayega.</div>
+          <textarea name="delivery_areas" rows="2" maxlength="1000" placeholder="e.g. Gulberg, DHA, Johar Town">{{ profile.delivery_areas }}</textarea>
+          <div class="ss-help">The areas you deliver to, separated by commas. If the customer's "Deliver to" area is among them, they will see your store.
+            If left empty, your store is shown only to customers in your city ({{ profile.city|default:"-" }}).</div>
           {% endif %}
         </div>
 
         <div class="ss-sec">About your store</div>
         <div class="ss-group">
           <label>Description</label>
-          <textarea name="store_description" rows="3" maxlength="1000" placeholder="Aap kya bechte hain, khaasiyat...">{{ profile.store_description }}</textarea>
+          <textarea name="store_description" rows="3" maxlength="1000" placeholder="What you sell, your specialities...">{{ profile.store_description }}</textarea>
         </div>
         <div class="ss-row">
           <div class="ss-group">
@@ -137,7 +137,7 @@
         <button type="submit" class="ss-btn">Save Store Settings</button>
       </form>
       <div class="ss-links">
-        {% if profile.is_approved %}<a href="{% url 'store_detail' profile.pk %}"><i class="bi bi-eye"></i> Customer ko meri store kaisi dikhti ha</a>{% endif %}
+        {% if profile.is_approved %}<a href="{% url 'store_detail' profile.pk %}"><i class="bi bi-eye"></i> How my store looks to customers</a>{% endif %}
         <a href="{% url 'vendor_dashboard' %}"><i class="bi bi-arrow-left"></i> Back to dashboard</a>
       </div>
     </div>

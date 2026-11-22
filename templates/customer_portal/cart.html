@@ -38,9 +38,9 @@
     <div class="alert alert-danger">🔒 {{ store.closed_message }}</div>
     {% elif not store.min_ok %}
     <div class="alert alert-warning">
-        ⚠️ {{ store.name }} ka minimum order Rs. {{ store.min_order|floatformat:0 }} hai.
-        Aur <b>Rs. {{ store.short_by|floatformat:0 }}</b> ka maal add karein.
-        {% if store.profile %}<a href="{% url 'store_detail' store.profile.pk %}" class="alert-link">Is store se aur add karein</a>{% endif %}
+        ⚠️ The minimum order for {{ store.name }} is Rs. {{ store.min_order|floatformat:0 }}.
+        Add <b>Rs. {{ store.short_by|floatformat:0 }}</b> more to continue.
+        {% if store.profile %}<a href="{% url 'store_detail' store.profile.pk %}" class="alert-link">Add more from this store</a>{% endif %}
     </div>
     {% endif %}
     {% endif %}
@@ -156,7 +156,7 @@
                     
                     {% if store and store.is_vendor_store and not store.is_open or store and store.is_vendor_store and not store.min_ok %}
                     <button type="button" class="btn btn-checkout w-100 btn-lg mb-2" disabled style="opacity:.55;">
-                        <i class="bi bi-lock-fill"></i> {% if not store.is_open %}Store band hai{% else %}Min. order Rs. {{ store.min_order|floatformat:0 }}{% endif %}
+                        <i class="bi bi-lock-fill"></i> {% if not store.is_open %}Store is closed{% else %}Min. order Rs. {{ store.min_order|floatformat:0 }}{% endif %}
                     </button>
                     {% else %}
                     <a href="{% url 'checkout' %}" class="btn btn-checkout w-100 btn-lg mb-2">
@@ -165,7 +165,7 @@
                     {% if whatsapp_cart_url %}
                     <a href="{{ whatsapp_cart_url }}" target="_blank" rel="noopener noreferrer"
                        class="btn w-100 btn-lg mb-2 btn-wa-order">
-                        <i class="bi bi-whatsapp"></i> WhatsApp par order bhejein
+                        <i class="bi bi-whatsapp"></i> Send order on WhatsApp
                     </a>
                     {% endif %}
                     {% endif %}
@@ -219,7 +219,7 @@
         <div class="d-flex align-items-center gap-2">
             {% if whatsapp_cart_url %}
             <a href="{{ whatsapp_cart_url }}" target="_blank" rel="noopener noreferrer"
-               class="btn btn-wa-mobile" aria-label="WhatsApp par order bhejein" title="WhatsApp par order bhejein">
+               class="btn btn-wa-mobile" aria-label="Send order on WhatsApp" title="Send order on WhatsApp">
                 <i class="bi bi-whatsapp"></i>
             </a>
             {% endif %}

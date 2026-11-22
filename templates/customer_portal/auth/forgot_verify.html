@@ -7,8 +7,8 @@
     <div class="login-card">
         <div class="login-header">
             <div class="login-icon"><i class="bi bi-shield-lock-fill"></i></div>
-            <h3>OTP Verify Karein</h3>
-            <p>{{ masked_phone }} ke liye</p>
+            <h3>Verify OTP</h3>
+            <p>For {{ masked_phone }}</p>
         </div>
         <div class="login-body">
             {% include 'customer_portal/auth/_auth_messages.html' %}
@@ -18,7 +18,7 @@
                     <label for="otp"><i class="bi bi-123"></i> 6 digit OTP</label>
                     <input type="text" name="otp" id="otp" class="fp-otp" maxlength="6" required
                            inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" autofocus placeholder="------">
-                    <p class="fp-hint">OTP email par gaya hai. Email na mile to spam folder dekhein, ya shop se rabta karein.</p>
+                    <p class="fp-hint">The OTP was sent by email. If you do not receive it, check your spam folder or contact the shop.</p>
                 </div>
                 <button type="submit" class="btn-login">
                     <i class="bi bi-check2-circle"></i> <span>Verify</span>
@@ -26,7 +26,7 @@
             </form>
         </div>
         <div class="login-footer">
-            <p>OTP nahi mila? <a href="{% url 'customer_forgot_password' %}">Dobara bhejein</a></p>
+            <p>Did not receive the OTP? <a href="{% url 'customer_forgot_password' %}">Send again</a></p>
         </div>
     </div>
 </div>

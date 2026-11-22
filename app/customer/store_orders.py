@@ -30,12 +30,12 @@ ZERO = Decimal('0.00')
 
 # Vendor reject karte waqt in mein se wajah chunta hai
 REJECT_REASONS = [
-    ('out_of_stock', 'Item abhi stock mein nahi'),
-    ('store_busy', 'Store abhi bohat busy hai'),
-    ('store_closed', 'Store band ho raha hai'),
-    ('out_of_area', 'Aap ke area mein delivery nahi'),
-    ('price_issue', 'Item ki price/detail mein ghalti'),
-    ('other', 'Doosri wajah'),
+    ('out_of_stock', 'Item is out of stock right now'),
+    ('store_busy', 'The store is very busy right now'),
+    ('store_closed', 'The store is closing'),
+    ('out_of_area', 'We do not deliver to your area'),
+    ('price_issue', 'Wrong item price/details'),
+    ('other', 'Other reason'),
 ]
 REJECT_REASON_LABELS = dict(REJECT_REASONS)
 
@@ -129,7 +129,7 @@ def cart_store_rules(cart, subtotal):
         'time_text': f"{prof.delivery_time_min}-{prof.delivery_time_max} min",
     })
     if not prof.is_open_now:
-        rules['closed_message'] = f'{prof.business_name} abhi band hai, baad mein order karein.'
+        rules['closed_message'] = f'{prof.business_name} is closed right now, please order later.'
     return rules
 
 
@@ -161,13 +161,13 @@ def validate_cart_for_order(cart, subtotal):
     """Order se pehle check. Masla ho to message (str) lautata hai, theek ho to None."""
     rules = cart_store_rules(cart, subtotal)
     if rules['mixed']:
-        return 'Cart mein alag alag stores ka maal hai. Cart khali karke ek hi store se order karein.'
+        return 'Your cart has items from different stores. Empty the cart and order from one store only.'
     if rules['is_vendor_store']:
         if not rules['is_open']:
             return rules['closed_message']
         if not rules['min_ok']:
-            return (f"{rules['name']} ka minimum order Rs. {rules['min_order']:,.0f} hai. "
-                    f"Aur Rs. {rules['short_by']:,.0f} ka maal add karein.")
+            return (f"The minimum order for {rules['name']} is Rs. {rules['min_order']:,.0f}. "
+                    f"Add Rs. {rules['short_by']:,.0f} more to continue.")
     return None
 
 
@@ -281,10 +281,10 @@ def notify_vendor_new_order(order):
     items = order.items.count()
     _notify(
         prof.user,
-        f'🛒 Naya order #{order.order_no}',
+        f'🛒 New order #{order.order_no}',
         (f'{order.customer.name} - {items} item(s)\n'
          f'Total: Rs. {order_payable_total(order):,.0f}\n'
-         f'Dashboard mein Accept ya Reject karein.'),
+         f'Accept or Reject it in your dashboard.'),
         link='/shop/vendor/orders/',
         kind='sale',
         email=False,   # vendor ko dedicated email email_new_order se jati hai
@@ -372,15 +372,15 @@ def whatsapp_link(phone, text):
 def customer_whatsapp_text(order, action):
     shop = store_name(order.vendor_id)
     if action == 'accept':
-        eta = f" Taqreeban {order.prep_minutes} minute mein tayyar hoga." if order.prep_minutes else ''
-        return f"✅ {shop}: Aap ka order #{order.order_no} qubool ho gaya.{eta}"
+        eta = f" It will be ready in about {order.prep_minutes} minutes." if order.prep_minutes else ''
+        return f"✅ {shop}: Your order #{order.order_no} has been accepted.{eta}"
     if action == 'ready':
-        return f"📦 {shop}: Aap ka order #{order.order_no} tayyar hai."
+        return f"📦 {shop}: Your order #{order.order_no} is ready."
     if action == 'delivered':
-        return f"🎉 {shop}: Aap ka order #{order.order_no} deliver ho gaya. Shukriya!"
+        return f"🎉 {shop}: Your order #{order.order_no} has been delivered. Thank you!"
     if action == 'reject':
-        return (f"❌ {shop}: Maazrat, order #{order.order_no} qubool nahi ho saka. "
-                f"Wajah: {order.reject_reason}")
+        return (f"❌ {shop}: Sorry, order #{order.order_no} could not be accepted. "
+                f"Reason: {order.reject_reason}")
     return ''
 
 
@@ -418,9 +418,9 @@ def suggest_other_stores(order, limit=3):
 def refund_note(order):
     """Reject par paisa ka message. COD mein kuch kata hi nahi hota."""
     if (order.payment_method or 'cod') == 'cod':
-        return 'Cash on Delivery tha, is liye aap se koi paisa nahi liya gaya.'
-    return ('Aap ne online payment ki thi to poori raqam wapas ki jayegi. '
-            'Refund mein masla ho to humse rabta karein.')
+        return 'This was a Cash on Delivery order, so you have not been charged.'
+    return ('If you paid online, the full amount will be refunded. '
+            'If you have any problem with the refund, please contact us.')
 
 
 class OrderActionError(Exception):
@@ -433,10 +433,10 @@ def clean_reject_reason(code, note):
     label = REJECT_REASON_LABELS.get(code)
     note = (note or '').strip()
     if not label:
-        raise OrderActionError('Reject karne ki wajah chunein.')
+        raise OrderActionError('Please choose a reason for rejecting.')
     if code == 'other':
         if not note:
-            raise OrderActionError('"Doosri wajah" chunne par wajah likhna zaroori hai.')
+            raise OrderActionError('Please write the reason when you choose "Other reason".')
         return note[:200]
     return (f'{label}. {note}' if note else label)[:200]
 
@@ -451,7 +451,7 @@ def apply_vendor_action(order, action, *, user, prep_minutes=None, reason_code='
     allowed_from, new_status = ACTIONS[action]
     if order.status not in allowed_from:
         raise OrderActionError(
-            f'Order #{order.order_no} ab "{order.get_status_display()}" hai, ye action nahi ho sakta.')
+            f'Order #{order.order_no} is now "{order.get_status_display()}", so this action is not possible.')
 
     if action == 'reject':
         order.reject_reason = clean_reject_reason(reason_code, reason_note)
@@ -503,8 +503,8 @@ def auto_invoice_delivered(order, user):
         try:
             from django.contrib.auth.models import User
             for admin in order_admin_users():
-                _notify(admin, f'⚠️ Order #{order.order_no} ka invoice khud nahi bana',
-                        f'Wajah: {exc}\nOrder Delivered hai, manually "Convert to Invoice" karein.',
+                _notify(admin, f'⚠️ Invoice was not created automatically for order #{order.order_no}',
+                        f'Reason: {exc}\nThe order is Delivered; please use "Convert to Invoice" manually.',
                         f'/orders/sale/{order.id}/', 'warning')
         except Exception:
             pass
@@ -518,36 +518,36 @@ def after_vendor_action(order, action, user):
     shop = store_name(order.vendor_id)
 
     if action == 'accept':
-        eta = f'\nTayyar hone mein ~{order.prep_minutes} minute.' if order.prep_minutes else ''
-        _notify(cust_user, f'✅ Order #{order.order_no} qubool ho gaya',
-                f'{shop} ne aap ka order qubool kar liya.{eta}', link, 'success')
+        eta = f'\nReady in ~{order.prep_minutes} minutes.' if order.prep_minutes else ''
+        _notify(cust_user, f'✅ Order #{order.order_no} accepted',
+                f'{shop} has accepted your order.{eta}', link, 'success')
     elif action == 'ready':
-        _notify(cust_user, f'📦 Order #{order.order_no} tayyar hai',
-                f'{shop} ka maal tayyar hai.', link, 'info')
+        _notify(cust_user, f'📦 Order #{order.order_no} is ready',
+                f'Your order from {shop} is ready.', link, 'info')
     elif action == 'delivered':
-        _notify(cust_user, f'🎉 Order #{order.order_no} deliver ho gaya',
-                f'{shop} ka order aap tak pahunch gaya. Shukriya!', link, 'success')
+        _notify(cust_user, f'🎉 Order #{order.order_no} delivered',
+                f'Your order from {shop} has reached you. Thank you!', link, 'success')
         try:
             from django.contrib.auth.models import User
             for admin in order_admin_users():
-                _notify(admin, f'✅ Order #{order.order_no} deliver ho gaya',
-                        f'{shop} ne order deliver mark kiya. Rs. {order_payable_total(order):,.0f} '
+                _notify(admin, f'✅ Order #{order.order_no} delivered',
+                        f'{shop} marked the order as delivered. Rs. {order_payable_total(order):,.0f} '
                         f'({(order.payment_method or "cod").upper()}). '
-                        + ('Invoice khud ban gaya.' if order.converted_to_sale_id else 'Ab invoice bana sakte hain.'),
+                        + ('Invoice was created automatically.' if order.converted_to_sale_id else 'You can now create the invoice.'),
                         f'/orders/sale/{order.id}/', 'success')
         except Exception as exc:
             logger.error("Delivered notify error: %s", exc)
     elif action == 'reject':
-        _notify(cust_user, f'❌ Order #{order.order_no} reject ho gaya',
-                f'{shop} ne order qubool nahi kiya.\nWajah: {order.reject_reason}\n{refund_note(order)}',
+        _notify(cust_user, f'❌ Order #{order.order_no} rejected',
+                f'{shop} did not accept the order.\nReason: {order.reject_reason}\n{refund_note(order)}',
                 link, 'warning')
         # Online payment ho to admin ko refund yaad dilao
         if (order.payment_method or 'cod') != 'cod':
             try:
                 from django.contrib.auth.models import User
                 for admin in order_admin_users():
-                    _notify(admin, f'💰 Refund karna hai - #{order.order_no}',
-                            f'{shop} ne order reject kiya ({order.reject_reason}).\n'
+                    _notify(admin, f'💰 Refund due - #{order.order_no}',
+                            f'{shop} rejected the order ({order.reject_reason}).\n'
                             f'Payment: {order.payment_method}, Rs. {order_payable_total(order):,.0f}',
                             f'/orders/sale/{order.id}/', 'warning')
             except Exception as exc:

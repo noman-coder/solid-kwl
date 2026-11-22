@@ -68,7 +68,7 @@
                   <option value="{{ c.id }}" {% if v.category|stringformat:"s" == c.id|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
                 {% endfor %}
               </select>
-              <button type="button" class="pf-plus" title="Naya Category add karein" onclick="openMaster('category')">
+              <button type="button" class="pf-plus" title="Add new Category" onclick="openMaster('category')">
                 <i class="bi bi-plus-lg"></i>
               </button>
             </div>
@@ -83,7 +83,7 @@
                   <option value="{{ b.id }}" {% if v.brand|stringformat:"s" == b.id|stringformat:"s" %}selected{% endif %}>{{ b.name }}</option>
                 {% endfor %}
               </select>
-              <button type="button" class="pf-plus" title="Naya Brand add karein" onclick="openMaster('brand')">
+              <button type="button" class="pf-plus" title="Add new Brand" onclick="openMaster('brand')">
                 <i class="bi bi-plus-lg"></i>
               </button>
             </div>
@@ -100,7 +100,7 @@
                   <option value="{{ u.id }}" {% if v.unit|stringformat:"s" == u.id|stringformat:"s" %}selected{% endif %}>{{ u.name }}</option>
                 {% endfor %}
               </select>
-              <button type="button" class="pf-plus" title="Naya Unit add karein" onclick="openMaster('unit')">
+              <button type="button" class="pf-plus" title="Add new Unit" onclick="openMaster('unit')">
                 <i class="bi bi-plus-lg"></i>
               </button>
             </div>
@@ -115,7 +115,7 @@
         <div class="pf-group">
           <label for="price">Selling Price (Rs.) <span class="pf-req">*</span></label>
           <input type="number" name="price" id="price" min="0.01" step="0.01" required value="{{ v.price|stringformat:'s' }}">
-          <div class="pf-help">Customer shop par isi rate par kharidega. Cost price likhne ki zaroorat nahi.</div>
+          <div class="pf-help">The customer will buy at this price on the shop. You do not need to enter the cost price.</div>
         </div>
 
         <div class="pf-row">
@@ -127,28 +127,28 @@
             <label for="stock">{% if product %}Add Stock (Quantity){% else %}Stock Quantity <span class="pf-req">*</span>{% endif %}</label>
             <input type="number" name="stock" id="stock" min="0" step="any" {% if not product %}required{% endif %} value="{{ v.stock|stringformat:'s' }}">
             <div class="pf-help">
-              {% if product %}Maujooda stock: <b>{{ current_stock|floatformat:"-2" }}</b>. Naya maal bhejna ho to yahan quantity likhein.
-              {% else %}Kitni quantity aap supply kar sakte hain.{% endif %}
+              {% if product %}Current stock: <b>{{ current_stock|floatformat:"-2" }}</b>. Enter the quantity here if you are sending new stock.
+              {% else %}How much quantity you can supply.{% endif %}
             </div>
           </div>
         </div>
 
         <div class="pf-group" id="earnBox" data-commission="{{ commission_percent|stringformat:'s' }}"
              style="background:#eef2ff; border-radius:12px; padding:14px 16px;">
-          <div style="font-weight:700; margin-bottom:6px;">💰 Aap ko kitna milega</div>
-          <div class="pf-help" style="margin:0 0 8px;">Shop har bikri par <b>{{ commission_percent|floatformat:"-2" }}%</b> commission rakhta hai; baaqi aap ka.</div>
+          <div style="font-weight:700; margin-bottom:6px;">💰 What you will earn</div>
+          <div class="pf-help" style="margin:0 0 8px;">The shop keeps <b>{{ commission_percent|floatformat:"-2" }}%</b> commission on every sale; the rest is yours.</div>
           <div class="pf-row" style="gap:8px;">
-            <div>Customer ki price: <b id="earnPay">-</b></div>
+            <div>Customer price: <b id="earnPay">-</b></div>
             <div>Shop commission: <b id="earnFee">-</b></div>
           </div>
-          <div style="margin-top:6px; font-size:16px;">Har unit par aap ko: <b id="earnYou" style="color:#198754;">-</b></div>
+          <div style="margin-top:6px; font-size:16px;">You get per unit: <b id="earnYou" style="color:#198754;">-</b></div>
         </div>
 
         <div class="pf-group">
           <label for="image">Product Image {% if not product %}<span class="pf-req">*</span>{% endif %}</label>
           {% if product and product.image %}<div><img class="pf-current" src="{{ product.image.url }}" alt=""></div>{% endif %}
           <input type="file" name="image" id="image" accept="image/*" {% if not product %}required{% endif %}>
-          <div class="pf-help">JPG/PNG/WEBP, 5 MB tak.{% if product %} Nayi image dene par product dobara review hoga.{% endif %}</div>
+          <div class="pf-help">JPG/PNG/WEBP, up to 5 MB.{% if product %} Uploading a new image sends the product for review again.{% endif %}</div>
         </div>
 
         <button type="submit" class="pf-btn" id="saveBtn">{% if product %}Save Changes{% else %}Submit Product{% endif %}</button>
@@ -233,7 +233,7 @@ document.getElementById('productForm').addEventListener('submit', function () {
         var btn = document.getElementById('masterSave');
         var name = input.value.trim();
         err.textContent = '';
-        if (name.length < 2) { err.textContent = LABELS[current] + ' ka naam likhein.'; input.focus(); return; }
+        if (name.length < 2) { err.textContent = 'Enter the ' + LABELS[current] + ' name.'; input.focus(); return; }
 
         btn.disabled = true;
         fetch('/shop/vendor/api/create/' + current + '/', {
@@ -256,11 +256,11 @@ document.getElementById('productForm').addEventListener('submit', function () {
             }
             sel.value = d.id;
             document.getElementById('hint_' + current).textContent = d.existed
-                ? '✔ "' + d.name + '" pehle se maujood tha, select kar liya'
+                ? '✔ "' + d.name + '" already existed and has been selected'
                 : '✅ "' + d.name + '" add ho gaya';
             modal.hide();
         })
-        .catch(function () { btn.disabled = false; err.textContent = 'Network error, dobara koshish karein.'; });
+        .catch(function () { btn.disabled = false; err.textContent = 'Network error, please try again.'; });
     }
 
     document.getElementById('masterSave').addEventListener('click', save);

@@ -1,7 +1,7 @@
 """Store location verification (blue tick) + customer location.
 
-SAFE: sirf AddField hain. Koi table drop/wipe/rename nahi, koi RunPython/RunSQL nahi.
-Purani rows mein naye columns NULL / False rehte hain.
+SAFE: AddField operations only. No table is dropped, wiped or renamed, and there is no RunPython/RunSQL.
+Existing rows keep NULL / False in the new columns.
 """
 from django.db import migrations, models
 
@@ -15,24 +15,24 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name='vendorprofile', name='latitude',
-            field=models.FloatField(blank=True, null=True, help_text='Store ki verified latitude'),
+            field=models.FloatField(blank=True, null=True, help_text='Verified store latitude'),
         ),
         migrations.AddField(
             model_name='vendorprofile', name='longitude',
-            field=models.FloatField(blank=True, null=True, help_text='Store ki verified longitude'),
+            field=models.FloatField(blank=True, null=True, help_text='Verified store longitude'),
         ),
         migrations.AddField(
             model_name='vendorprofile', name='location_accuracy_m',
-            field=models.FloatField(blank=True, null=True, help_text='GPS accuracy (meters) jab location li gayi'),
+            field=models.FloatField(blank=True, null=True, help_text='GPS accuracy (meters) when the location was taken'),
         ),
         migrations.AddField(
             model_name='vendorprofile', name='location_consent_at',
-            field=models.DateTimeField(blank=True, null=True, help_text='Vendor ne privacy page par kab ittefaq kiya'),
+            field=models.DateTimeField(blank=True, null=True, help_text='When the vendor agreed on the privacy page'),
         ),
         migrations.AddField(
             model_name='vendorprofile', name='location_verified',
             field=models.BooleanField(default=False, verbose_name='Location verified',
-                                      help_text='True = store naam ke saath blue tick nazar aata hai'),
+                                      help_text='True = blue tick shown after the store name'),
         ),
         migrations.AddField(
             model_name='vendorprofile', name='location_verified_at',

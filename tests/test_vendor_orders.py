@@ -104,7 +104,7 @@ class CartRulesTests(Base):
         self.add(self.item1); self.add(self.item1)
         self.p1.store_status = 'closed'; self.p1.save()
         err = store_orders.validate_cart_for_order(self.client.session['cart'], Decimal('600'))
-        self.assertIn('band hai', err)
+        self.assertIn('closed', err)
 
 
 class PlaceOrderTests(Base):
@@ -161,7 +161,7 @@ class VendorOrderActionTests(Base):
         self.act('accept', prep_minutes='25')
         self.order.refresh_from_db()
         self.assertEqual((self.order.status, self.order.prep_minutes), ('confirmed', 25))
-        self.assertTrue(Notification.objects.filter(user=self.cust_user, title__contains='qubool').exists())
+        self.assertTrue(Notification.objects.filter(user=self.cust_user, title__contains='accepted').exists())
         self.act('ready')
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, 'ready')
@@ -176,10 +176,10 @@ class VendorOrderActionTests(Base):
         self.act('reject', reason_code='out_of_stock', reason_note='')
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, 'cancelled')
-        self.assertEqual(self.order.reject_reason, 'Item abhi stock mein nahi')
+        self.assertEqual(self.order.reject_reason, 'Item is out of stock right now')
         n = Notification.objects.get(user=self.cust_user, title__contains='reject')
-        self.assertIn('Item abhi stock mein nahi', n.message)
-        self.assertIn('wapas', n.message)  # online payment -> refund note
+        self.assertIn('Item is out of stock right now', n.message)
+        self.assertIn('refunded', n.message)  # online payment -> refund note
 
     def test_cannot_touch_other_vendors_order(self):
         self.client.logout()
@@ -199,12 +199,12 @@ class CustomerRejectedViewTests(Base):
     def test_customer_sees_reason_refund_and_other_stores(self):
         order = SaleOrder.objects.create(
             customer=self.customer, warehouse=self.wh, status='cancelled', vendor=self.v1,
-            payment_method='cod', reject_reason='Store abhi bohat busy hai')
+            payment_method='cod', reject_reason='The store is very busy right now')
         SaleOrderItem.objects.create(order=order, product=self.item1, qty=1, price=Decimal('300'))
         self.client.login(username='cust', password='secret12')
         r = self.client.get(reverse('order_detail_customer', args=[order.id]))
         self.assertTrue(r.context['store_rejected'])
-        self.assertContains(r, 'Store abhi bohat busy hai')
+        self.assertContains(r, 'The store is very busy right now')
         self.assertIn(self.p2, r.context['suggested_stores'])
         self.assertNotIn(self.p1, r.context['suggested_stores'])
 

@@ -130,14 +130,14 @@ def _err_text(exc):
 def _validate_image(f):
     """Image size/type check. Error text ya None return karta hai."""
     if f.size > MAX_IMAGE_BYTES:
-        return 'Image 5 MB se chhoti honi chahiye'
+        return 'Image must be smaller than 5 MB'
     try:
         from PIL import Image
         img = Image.open(f)
         img.verify()
         f.seek(0)
     except Exception:
-        return 'Valid image upload karein (JPG, PNG, WEBP)'
+        return 'Upload a valid image (JPG, PNG, WEBP)'
     return None
 
 
@@ -151,7 +151,7 @@ def _clean_product_form(request, editing=False, prefix=''):
 
     name = post.get(prefix + 'name', '').strip()[:100]
     if len(name) < 3:
-        errors.append('Product ka naam likhein (kam az kam 3 characters)')
+        errors.append('Enter the product name (at least 3 characters)')
 
     description = post.get(prefix + 'description', '').strip()[:2000]
 
@@ -184,7 +184,7 @@ def _clean_product_form(request, editing=False, prefix=''):
         price = price.quantize(Decimal('0.01'))
     except (InvalidOperation, AttributeError):
         price = None
-        errors.append('Sahi price likhein (0 se zyada)')
+        errors.append('Enter a valid price (greater than 0)')
 
     try:
         discount = Decimal(post.get(prefix + 'discount_percentage', '').strip() or '0')
@@ -192,7 +192,7 @@ def _clean_product_form(request, editing=False, prefix=''):
             raise InvalidOperation
     except InvalidOperation:
         discount = Decimal('0')
-        errors.append('Discount 0 se 90 ke darmiyan hona chahiye')
+        errors.append('Discount must be between 0 and 90')
 
     try:
         stock = float(post.get(prefix + 'stock', '').strip() or '0')
@@ -202,7 +202,7 @@ def _clean_product_form(request, editing=False, prefix=''):
         stock = 0
         errors.append('Stock sahi number hona chahiye')
     if not editing and stock <= 0:
-        errors.append('Stock 0 se zyada likhein')
+        errors.append('Enter stock greater than 0')
 
     image = request.FILES.get(prefix + 'image')
     if image:
@@ -210,7 +210,7 @@ def _clean_product_form(request, editing=False, prefix=''):
         if err:
             errors.append(err)
     elif not editing:
-        errors.append('Product ki image upload karein')
+        errors.append('Upload the product image')
 
     return {
         'name': name, 'description': description, 'category': category,
@@ -306,9 +306,9 @@ def vendor_register(request):
         if not request.POST.get('accept_privacy'):
             return fail('❌ Please accept the Privacy Policy to create an account')
         if len(business_name) < 3:
-            return fail('❌ Business/Shop ka naam likhein')
+            return fail('❌ Enter the business/shop name')
         if len(owner_name) < 3:
-            return fail('❌ Apna poora naam likhein')
+            return fail('❌ Enter your full name')
         if not phone or not is_valid_phone(phone):
             return fail('❌ Sahi phone number likhein')
         try:
@@ -322,15 +322,15 @@ def vendor_register(request):
         if len(password) < 6:
             return fail('❌ Password kam az kam 6 characters')
         if password != confirm:
-            return fail('❌ Passwords match nahi karte')
+            return fail('❌ Passwords do not match')
 
         phone = normalize_phone(phone)
 
         if Vendor.objects.filter(contact_number=phone).exists():
-            messages.error(request, '⚠️ Ye phone pehle se registered hai')
+            messages.error(request, '⚠️ This phone number is already registered')
             return redirect('vendor_login')
         if User.objects.filter(email__iexact=email).exists():
-            return fail('⚠️ Ye email pehle se registered hai')
+            return fail('⚠️ This email is already registered')
 
         try:
             with transaction.atomic():
@@ -363,14 +363,14 @@ def vendor_register(request):
                 request.session.save()
         except Exception:
             logger.exception("Vendor register error")
-            return fail('❌ Registration mein masla aaya, dobara koshish karein')
+            return fail('❌ Registration failed, please try again')
 
         if approved:
-            messages.success(request, '🎉 Account ban gaya! Ab aap products list kar sakte hain.')
+            messages.success(request, '🎉 Account created! You can now list products.')
         else:
             messages.success(
                 request,
-                '🎉 Account ban gaya! Admin approval ke baad aap products list kar sakenge.'
+                '🎉 Account created! You can list products after admin approval.'
             )
         return redirect('vendor_dashboard')
 
@@ -404,7 +404,7 @@ def vendor_login(request):
         key = _login_key(phone, ip)
 
         if cache.get(key, 0) >= LOGIN_MAX_ATTEMPTS:
-            messages.error(request, '🔒 Bohat zyada koshishen. 10 minute baad dobara try karein.')
+            messages.error(request, '🔒 Too many attempts. Please try again after 10 minutes.')
             return redirect('vendor_login')
 
         profile = (
@@ -417,7 +417,7 @@ def vendor_login(request):
 
         if not user:
             cache.set(key, cache.get(key, 0) + 1, LOGIN_LOCK_SECONDS)
-            messages.error(request, '❌ Phone ya password ghalat hai')
+            messages.error(request, '❌ Wrong phone or password')
             return redirect('vendor_login')
 
         cache.delete(key)
@@ -500,17 +500,17 @@ def vendor_location_verify(request):
             return redirect('vendor_location_verify')
 
         if not profile.is_approved:
-            return fail('Pehle admin aap ka account approve kare, phir location verify hogi.', 403)
+            return fail('Your account must be approved by the admin before you can verify your location.', 403)
 
         if (request.POST.get('consent') or '') != '1':
-            return fail('Location lene se pehle aap ka ittefaq (agree) zaroori hai.')
+            return fail('You must agree before your location can be taken.')
 
         lat, lng, acc, err = parse_coords(request)
         if err:
             return fail(err)
         if acc is not None and acc > max_accuracy_m():
-            return fail('Location sahi tarah nahi aayi (ghalti %d meter). Store ke andar phone ka GPS/Location on kar '
-                        'ke dobara koshish karein.' % acc)
+            return fail('Location was not accurate enough (error %d meters). Turn on your phone GPS/Location inside the store '
+                        'and try again.' % acc)
 
         profile.latitude, profile.longitude, profile.location_accuracy_m = lat, lng, acc
         profile.location_consent_at = now()
@@ -524,7 +524,7 @@ def vendor_location_verify(request):
 
         if wants_json:
             return JsonResponse({'success': True, 'redirect': reverse('vendor_dashboard')})
-        messages.success(request, 'Aap ke store ki location verify ho gayi. Ab store naam ke saath blue tick nazar aayega.')
+        messages.success(request, 'Your store location is verified. A blue tick will now show after your store name.')
         return redirect('vendor_dashboard')
 
     return render(request, 'customer_portal/vendor/location_verify.html', {
@@ -605,12 +605,12 @@ def vendor_product_add(request):
     """
     profile = request.user.vendor_profile
     if not profile.is_approved:
-        messages.warning(request, '⏳ Aap ka account abhi approve nahi hua.')
+        messages.warning(request, '⏳ Your account has not been approved yet.')
         return redirect('vendor_dashboard')
 
     warehouse = _stock_warehouse()
     if not warehouse:
-        messages.error(request, '❌ Shop mein warehouse set nahi hai, admin se rabta karein.')
+        messages.error(request, '❌ No warehouse is set up in the shop, please contact the admin.')
         return redirect('vendor_dashboard')
 
     if request.method == 'POST':
@@ -635,26 +635,26 @@ def vendor_product_add(request):
                     errors = [_err_text(exc)]
                 except Exception:
                     logger.exception("Vendor product add error")
-                    errors = ['Product save nahi ho saka, dobara koshish karein']
+                    errors = ['Could not save the product, please try again']
             failed.append({'id': rid, 'v': _row_values(request.POST, prefix), 'errors': errors})
 
         if not saved and not failed:
-            messages.error(request, '❌ Kam az kam ek product ki details likhein')
+            messages.error(request, '❌ Enter the details of at least one product')
             return render(request, 'customer_portal/vendor/product_bulk_form.html',
                           _bulk_context(request, [{'id': '1', 'v': _blank_values(), 'errors': []}]))
 
         if saved:
             what = 'Product' if saved == 1 else f'{saved} products'
             if _auto_approve_products():
-                messages.success(request, f'✅ {what} shop par list ho gaye!')
+                messages.success(request, f'✅ {what} listed on the shop!')
             else:
-                messages.success(request, f'✅ {what} jama ho gaye. Admin approval ke baad shop par nazar aayenge.')
+                messages.success(request, f'✅ {what} submitted. They will appear on the shop after admin approval.')
 
         if failed:
             messages.error(
                 request,
-                f'❌ {len(failed)} product save nahi hue. Neeche ghalti theek karein aur dobara submit karein '
-                f'(image dobara select karni hogi).'
+                f'❌ {len(failed)} product(s) could not be saved. Fix the errors below and submit again '
+                f'(you will need to select the image again).'
             )
             return render(request, 'customer_portal/vendor/product_bulk_form.html',
                           _bulk_context(request, failed))
@@ -671,7 +671,7 @@ def vendor_product_edit(request, pk):
     product = get_object_or_404(Product, pk=pk, vendor=profile.vendor)
 
     if not profile.is_approved:
-        messages.warning(request, '⏳ Aap ka account abhi approve nahi hua.')
+        messages.warning(request, '⏳ Your account has not been approved yet.')
         return redirect('vendor_dashboard')
 
     warehouse = _stock_warehouse()
@@ -727,7 +727,7 @@ def vendor_product_edit(request, pk):
                 reprice_open_batches(product, data['price'], data['discount'], pct)
                 if data['stock'] > 0:
                     if not warehouse:
-                        raise ValidationError('Shop mein warehouse set nahi hai')
+                        raise ValidationError('No warehouse is set up in the shop')
                     _add_stock(product, warehouse, data['stock'], cost, data['price'])
         except ValidationError as exc:
             messages.error(request, f'❌ {_err_text(exc)}')
@@ -735,11 +735,11 @@ def vendor_product_edit(request, pk):
                           _form_context(request, product=product, data=request.POST))
         except Exception:
             logger.exception("Vendor product edit error")
-            messages.error(request, '❌ Update nahi ho saka, dobara koshish karein')
+            messages.error(request, '❌ Could not update, please try again')
             return redirect('vendor_product_edit', pk=pk)
 
         if resubmitted:
-            messages.success(request, '✅ Update ho gaya. Tabdeeli dobara admin review ke liye gayi hai.')
+            messages.success(request, '✅ Updated. The change has been sent for admin review again.')
         else:
             messages.success(request, '✅ Product update ho gaya.')
         return redirect('vendor_dashboard')
@@ -770,7 +770,7 @@ def vendor_create_master(request, kind):
     label = MASTER_LABELS[kind]
 
     if not request.user.vendor_profile.is_approved:
-        return JsonResponse({'success': False, 'message': 'Aap ka account abhi approve nahi hua.'}, status=403)
+        return JsonResponse({'success': False, 'message': 'Your account has not been approved yet.'}, status=403)
 
     try:
         payload = json.loads(request.body or '{}')
@@ -778,7 +778,7 @@ def vendor_create_master(request, kind):
         payload = {}
     name = ' '.join(str(payload.get('name', '')).split())
     if len(name) < 2 or len(name) > 100:
-        return JsonResponse({'success': False, 'message': f'{label} ka naam 2 se 100 characters ka likhein.'})
+        return JsonResponse({'success': False, 'message': f'The {label} name must be 2 to 100 characters.'})
 
     existing = model.objects.filter(name__iexact=name).first()
     if existing:
@@ -789,14 +789,14 @@ def vendor_create_master(request, kind):
     used = cache.get(key, 0)
     if used >= MASTER_CREATE_LIMIT:
         return JsonResponse({'success': False,
-                             'message': 'Naye naam banane ki hadd poori ho gayi, thori der baad koshish karein.'})
+                             'message': 'You have reached the limit for creating new names, please try again later.'})
 
     try:
         obj = model.objects.create(name=name)
     except IntegrityError:           # isi lamhe kisi aur ne wohi naam bana diya
         obj = model.objects.filter(name__iexact=name).first()
         if not obj:
-            return JsonResponse({'success': False, 'message': 'Save nahi ho saka, dobara koshish karein.'})
+            return JsonResponse({'success': False, 'message': 'Could not save, please try again.'})
         return JsonResponse({'success': True, 'id': obj.id, 'name': obj.name, 'existed': True})
 
     cache.set(key, used + 1, 3600)
@@ -814,14 +814,14 @@ def vendor_product_toggle(request, pk):
     product = get_object_or_404(Product, pk=pk, vendor=profile.vendor)
 
     if product.approval_status != 'approved':
-        messages.error(request, '❌ Sirf approved product show/hide ho sakta hai')
+        messages.error(request, '❌ Only an approved product can be shown/hidden')
         return redirect('vendor_dashboard')
 
     Product.objects.filter(pk=product.pk).update(is_active=not product.is_active)
     messages.success(
         request,
-        '👁️ Product ab shop par nazar aayega' if not product.is_active
-        else '🙈 Product shop se chhupa diya'
+        '👁️ The product is now visible on the shop' if not product.is_active
+        else '🙈 The product is now hidden from the shop'
     )
     return redirect('vendor_dashboard')
 
@@ -871,7 +871,7 @@ def vendor_store_settings(request):
             opens_at = closes_at = None
             errors.append('Opening/closing time sahi likhein')
         if bool(opens_at) != bool(closes_at):
-            errors.append('Opening aur closing dono time likhein (ya dono khali chhoden)')
+            errors.append('Enter both opening and closing time (or leave both empty)')
 
         min_order = _parse_money(post.get('min_order_amount'), 'Minimum order', errors)
         fee = _parse_money(post.get('delivery_fee'), 'Delivery fee', errors)
@@ -883,12 +883,12 @@ def vendor_store_settings(request):
                 raise ValueError
         except ValueError:
             t_min, t_max = profile.delivery_time_min, profile.delivery_time_max
-            errors.append('Delivery time minutes mein likhein (min, max se chhota ya barabar)')
+            errors.append('Enter delivery time in minutes (min must not be greater than max)')
 
         raw_areas = _areas_from_post(post)
         area_list = VendorProfile.clean_areas(raw_areas)
         if len([x for x in raw_areas.replace('\n', ',').replace(';', ',').split(',') if x.strip()]) > VendorProfile.MAX_AREAS:
-            errors.append(f'Zyada se zyada {VendorProfile.MAX_AREAS} areas likh sakte hain')
+            errors.append(f'You can enter at most {VendorProfile.MAX_AREAS} areas')
 
         logo, cover = request.FILES.get('logo'), request.FILES.get('cover_image')
         for f in (logo, cover):
@@ -1001,7 +1001,7 @@ def vendor_order_action(request, pk, action):
     back = f"{reverse('vendor_orders')}?tab={tab if tab in ORDER_TABS else 'new'}"
 
     if not request.user.vendor_profile.is_approved:
-        messages.error(request, '❌ Account approve hone ke baad hi orders handle ho sakte hain.')
+        messages.error(request, '❌ You can handle orders only after your account is approved.')
         return redirect(back)
 
     try:
@@ -1017,9 +1017,9 @@ def vendor_order_action(request, pk, action):
                     try:
                         prep = int(raw)
                     except ValueError:
-                        raise store_orders.OrderActionError('Tayyari ka time minutes mein likhein.')
+                        raise store_orders.OrderActionError('Enter the preparation time in minutes.')
                     if not 1 <= prep <= 600:
-                        raise store_orders.OrderActionError('Tayyari ka time 1 se 600 minute ke beech likhein.')
+                        raise store_orders.OrderActionError('Enter a preparation time between 1 and 600 minutes.')
 
             store_orders.apply_vendor_action(
                 order, action, user=request.user, prep_minutes=prep,
@@ -1031,10 +1031,10 @@ def vendor_order_action(request, pk, action):
         return redirect(back)
 
     done = {
-        'accept': f'✅ Order #{order.order_no} qubool kar liya.',
-        'reject': f'❌ Order #{order.order_no} reject kar diya. Customer ko wajah bata di gayi.',
-        'ready': f'📦 Order #{order.order_no} tayyar hai.',
-        'delivered': f'🎉 Order #{order.order_no} deliver ho gaya. Mukammal tab mein dekh sakte hain.',
+        'accept': f'✅ Order #{order.order_no} accepted.',
+        'reject': f'❌ Order #{order.order_no} rejected. The customer has been told the reason.',
+        'ready': f'📦 Order #{order.order_no} is ready.',
+        'delivered': f'🎉 Order #{order.order_no} delivered. You can see it in the Completed tab.',
     }[action]
     messages.success(request, done)
     # accept ke baad order "Chal rahe" mein chala jata hai

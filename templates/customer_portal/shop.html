@@ -1763,15 +1763,15 @@
     <div class="area-sheet">
         {% csrf_token %}
         <h3 id="areaTitle">Deliver to</h3>
-        <p>Apna shehar chunein ya area likhein (jaise "Gulberg, Lahore").</p>
+        <p>Choose your city or type your area (e.g. "Gulberg, Lahore").</p>
         {% if delivery_cities %}
         <div class="area-chips" id="areaChips">
             {% for c in delivery_cities %}<button type="button" class="area-chip{% if c == delivery_area %} on{% endif %}" data-area="{{ c }}">{{ c }}</button>{% endfor %}
         </div>
         {% endif %}
         {% if delivery_area_groups %}
-        <select class="area-input" id="areaSelect" aria-label="Area chunein">
-            <option value="">-- Apna area chunein --</option>
+        <select class="area-input" id="areaSelect" aria-label="Choose area">
+            <option value="">-- Choose your area --</option>
             {% for city, areas in delivery_area_groups %}
             <optgroup label="{{ city }}">
                 {% for a in areas %}<option value="{{ a }}"{% if a == delivery_area %} selected{% endif %}>{{ a }}</option>{% endfor %}
@@ -1779,7 +1779,7 @@
             {% endfor %}
         </select>
         {% endif %}
-        <input type="text" class="area-input" id="areaInput" maxlength="100" value="{{ delivery_area }}" placeholder="{% if delivery_area_groups %}List mein nahi? Yahan likhein{% else %}Shehar ya area{% endif %}" autocomplete="off">
+        <input type="text" class="area-input" id="areaInput" maxlength="100" value="{{ delivery_area }}" placeholder="{% if delivery_area_groups %}Not in the list? Type it here{% else %}City or area{% endif %}" autocomplete="off">
         <div class="area-actions">
             <button type="button" class="area-clear" id="areaClear">Clear</button>
             <button type="button" class="area-save" id="areaSave">Save</button>
@@ -1806,7 +1806,7 @@
     @media (prefers-reduced-motion: reduce) { .wa-float { animation: none; } }
 </style>
 <a href="{{ whatsapp_url }}" class="wa-float" target="_blank" rel="noopener noreferrer"
-   aria-label="WhatsApp par chat karein" title="WhatsApp par chat karein">
+   aria-label="Chat on WhatsApp" title="Chat on WhatsApp">
     <i class="bi bi-whatsapp"></i>
 </a>
 {% endif %}
@@ -2049,8 +2049,8 @@ function getCookie(name) {
           .then(function(r){return r.json();})
           .then(function(d){
               if(d.success){ label.textContent=d.area||'Select location'; close(); }
-              else alert('Location save nahi hui, dobara koshish karein.');
-          }).catch(function(){ alert('Network error, dobara koshish karein.'); });
+              else alert('Location could not be saved, please try again.');
+          }).catch(function(){ alert('Network error, please try again.'); });
     }
     document.getElementById('areaSave').addEventListener('click',function(){ save(input.value.trim()); });
     document.getElementById('areaClear').addEventListener('click',function(){ input.value=''; if(sel) sel.value=''; chips.forEach(function(x){x.classList.remove('on');}); save(''); });

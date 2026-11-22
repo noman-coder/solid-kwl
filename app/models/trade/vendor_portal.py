@@ -113,17 +113,17 @@ class VendorProfile(models.Model):
     )
 
     # ---- Verified store location (blue tick) ----
-    # Vendor ki marzi (consent) ke baad uske phone/browser se li gayi location.
-    # Sab fields null/False default ke saath hain, is liye purana data jyon ka tyon rehta hai.
-    latitude = models.FloatField(null=True, blank=True, help_text="Store ki verified latitude")
-    longitude = models.FloatField(null=True, blank=True, help_text="Store ki verified longitude")
+    # Location taken from the vendor's phone/browser after consent.
+    # All fields default to null/False, so existing data is untouched.
+    latitude = models.FloatField(null=True, blank=True, help_text="Verified store latitude")
+    longitude = models.FloatField(null=True, blank=True, help_text="Verified store longitude")
     location_accuracy_m = models.FloatField(
-        null=True, blank=True, help_text="GPS accuracy (meters) jab location li gayi")
+        null=True, blank=True, help_text="GPS accuracy (meters) when the location was taken")
     location_consent_at = models.DateTimeField(
-        null=True, blank=True, help_text="Vendor ne privacy page par kab ittefaq kiya")
+        null=True, blank=True, help_text="When the vendor agreed on the privacy page")
     location_verified = models.BooleanField(
         default=False, verbose_name="Location verified",
-        help_text="True = store naam ke saath blue tick nazar aata hai")
+        help_text="True = blue tick shown after the store name")
     location_verified_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -150,7 +150,7 @@ class VendorProfile(models.Model):
 
     @property
     def has_location(self):
-        """Verified location maujood hai? (distance sirf isi surat mein dikhai jati hai)"""
+        """True when a verified location exists (distance is shown only in this case)."""
         return bool(self.location_verified and self.latitude is not None and self.longitude is not None)
 
     @property

@@ -65,7 +65,7 @@
 <nav class="nav">
   <a href="{% url 'rider_home' %}" class="{% if nav == 'orders' %}on{% endif %}"><span>🛵</span>Orders{% if active_count %}<i class="badge">{{ active_count }}</i>{% endif %}</a>
   <a href="{% url 'rider_history' %}" class="{% if nav == 'history' %}on{% endif %}"><span>🧾</span>History</a>
-  <a href="{% url 'rider_earnings' %}" class="{% if nav == 'earnings' %}on{% endif %}"><span>💰</span>Kamai</a>
+  <a href="{% url 'rider_earnings' %}" class="{% if nav == 'earnings' %}on{% endif %}"><span>💰</span>Earnings</a>
 </nav>
 
 <script>
@@ -89,8 +89,8 @@
     fetch("{% url 'rider_poll' %}",{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
       var key = d.offers+'|'+d.assigned;
       if(last!==null && key!==last){
-        if(d.offers>(+last.split('|')[0])){beep();toast('🆕 Naya order available!');}
-        else if(d.assigned>(+last.split('|')[1])){beep();toast('🏍️ Aap ko naya order diya gaya!');}
+        if(d.offers>(+last.split('|')[0])){beep();toast('🆕 New order available!');}
+        else if(d.assigned>(+last.split('|')[1])){beep();toast('🏍️ A new order was assigned to you!');}
         if(window.location.pathname.replace(/\/$/,'').endsWith('/rider')){setTimeout(function(){location.reload()},1500);}
       }
       last=key;

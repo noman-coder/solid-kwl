@@ -26,8 +26,8 @@ def build_whatsapp_link(company, text=None):
         return ''
     if text is None:
         name = getattr(company, 'name', '') or 'your shop'
-        text = (f"Assalam o Alaikum! Mujhe {name} ki shop se products ke baare mein "
-                f"maloomat chahiye. Please meri madad karein.")
+        text = (f"Hello! I would like some information about products from {name}. "
+                f"Please help me.")
     return f"https://wa.me/{digits}?text={quote(text)}"
 
 
@@ -41,23 +41,23 @@ def _rs(value):
 
 def product_order_text(name, price, qty, url):
     total = float(price) * int(qty)
-    return (f"Assalam o Alaikum! Mujhe ye product order karna hai:\n\n"
+    return (f"Hello! I would like to order this product:\n\n"
             f"Product: {name}\nQuantity: {qty}\nPrice: Rs. {_rs(price)} (per unit)\n"
-            f"Total: Rs. {_rs(total)}\nLink: {url}\n\nPlease confirm karein.")
+            f"Total: Rs. {_rs(total)}\nLink: {url}\n\nPlease confirm.")
 
 
 def cart_order_text(cart_items, subtotal, delivery_charges, total_amount):
     lines = []
     for i, it in enumerate(cart_items, 1):
         lines.append(f"{i}. {it.get('name')} x {it.get('quantity')} = Rs. {_rs(it.get('subtotal', 0))}")
-    text = "Assalam o Alaikum! Mujhe ye order karna hai:\n\n" + "\n".join(lines)
+    text = "Hello! I would like to place this order:\n\n" + "\n".join(lines)
     text += f"\n\nSubtotal: Rs. {_rs(subtotal)}"
     if delivery_charges:
         text += f"\nDelivery: Rs. {_rs(delivery_charges)}"
-    text += f"\nTotal: Rs. {_rs(total_amount)}\n\nPlease order confirm karein."
+    text += f"\nTotal: Rs. {_rs(total_amount)}\n\nPlease confirm the order."
     return text
 
 
 def support_text(order_no):
-    return (f"Assalam o Alaikum! Mujhe apne order #{order_no} ke baare mein madad chahiye. "
-            f"Please iska status bata dein.")
+    return (f"Hello! I need help with my order #{order_no}. "
+            f"Please tell me its status.")

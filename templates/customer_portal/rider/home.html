@@ -3,7 +3,7 @@
 {% block body %}
 <div class="stats">
   <div class="stat"><b>{{ today.deliveries }}</b><small>Aaj deliveries</small></div>
-  <div class="stat"><b>Rs. {{ today.earned|floatformat:0 }}</b><small>Aaj ki kamai</small></div>
+  <div class="stat"><b>Rs. {{ today.earned|floatformat:0 }}</b><small>Today's earnings</small></div>
   <div class="stat"><b>Rs. {{ balances.cash_in_hand|floatformat:0 }}</b><small>Cash paas</small></div>
 </div>
 <div class="wrap">
@@ -12,7 +12,7 @@
   {% for r in mine %}
   <div class="card">
     <div class="row"><span class="no">#{{ r.order.order_no }}</span>
-      <span class="pill {% if r.di.status == 'assigned' %}{% else %}b{% endif %}">{% if r.di.status == 'assigned' %}Maal uthana hai{% else %}Customer ko dena hai{% endif %}</span></div>
+      <span class="pill {% if r.di.status == 'assigned' %}{% else %}b{% endif %}">{% if r.di.status == 'assigned' %}Pick up the order{% else %}Deliver to customer{% endif %}</span></div>
 
     <div class="sep"></div>
     <div class="row"><span>📍 <b>{{ r.store }}</b>{% if r.store_addr %}<br><small>{{ r.store_addr }}</small>{% endif %}</span>
@@ -30,27 +30,27 @@
     <div class="sep"></div>
     {% for it in r.items %}<div class="row"><span>{{ it.qty|floatformat:"-2" }} × {{ it.product.name }}</span></div>{% endfor %}
 
-    {% if r.is_cod %}<div class="cod">💵 Cash on Delivery — customer se Rs. {{ r.total|floatformat:0 }} lein</div>
-    {% else %}<div class="paid">✅ Payment ho chuki — cash nahi lena</div>{% endif %}
+    {% if r.is_cod %}<div class="cod">💵 Cash on Delivery — collect Rs. {{ r.total|floatformat:0 }} from the customer</div>
+    {% else %}<div class="paid">✅ Already paid — do not collect cash</div>{% endif %}
 
     <div class="acts">
       {% if r.di.status == 'assigned' %}
         <form method="post" action="{% url 'rider_order_action' r.order.id 'pickup' %}" style="flex:1">{% csrf_token %}
-          <button class="btn o">📦 Maal le liya</button></form>
+          <button class="btn o">📦 Picked up</button></form>
       {% else %}
         <form method="post" action="{% url 'rider_order_action' r.order.id 'deliver' %}" style="flex:1"
-              onsubmit="return confirm('Order customer ko de diya{% if r.is_cod %} aur Rs. {{ r.total|floatformat:0 }} cash le liya{% endif %}?');">{% csrf_token %}
+              onsubmit="return confirm('Order delivered to the customer{% if r.is_cod %} and Rs. {{ r.total|floatformat:0 }} cash collected{% endif %}?');">{% csrf_token %}
           <button class="btn">🎉 Deliver ho gaya{% if r.is_cod %} / Cash liya{% endif %}</button></form>
       {% endif %}
     </div>
   </div>
   {% empty %}
-    <div class="card empty">Abhi aap ke paas koi order nahi.</div>
+    <div class="card empty">You have no orders right now.</div>
   {% endfor %}
 
-  <h3>🆕 Naye orders</h3>
+  <h3>🆕 New orders</h3>
   {% if not rider.is_online %}
-    <div class="card empty">Naye orders dekhne ke liye upar se <b>Online</b> hon.</div>
+    <div class="card empty">Go <b>Online</b> at the top to see new orders.</div>
   {% else %}
     {% for o in offers %}
     <div class="card">
@@ -60,10 +60,10 @@
       <div class="row"><small>{{ o.items_count }} item(s)</small>
         {% if o.is_cod %}<span class="pill">💵 COD Rs. {{ o.total|floatformat:0 }}</span>{% else %}<span class="pill g">✅ Paid</span>{% endif %}</div>
       <form method="post" action="{% url 'rider_accept_order' o.order.id %}" class="acts">{% csrf_token %}
-        <button class="btn">✅ Accept karein</button></form>
+        <button class="btn">✅ Accept</button></form>
     </div>
     {% empty %}
-      <div class="card empty">Abhi koi naya order nahi. Naya aate hi awaaz aayegi 🔔</div>
+      <div class="card empty">No new orders right now. You will hear a sound when one arrives 🔔</div>
     {% endfor %}
   {% endif %}
 </div>

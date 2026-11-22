@@ -72,11 +72,11 @@
     </div>
 
     {% if not profile.is_approved %}
-        <div class="vo-alert warning">Account approve hone ke baad hi aap orders handle kar sakenge.</div>
+        <div class="vo-alert warning">You can handle orders only after your account is approved.</div>
     {% endif %}
 
     <div id="voNewBanner" onclick="location.href='{% url 'vendor_orders' %}?tab=new'">
-        🔔 Naya order aaya hai! Dekhne ke liye yahan tap karein
+        🔔 New order received! Tap here to view
     </div>
 
     <div class="vo-tabs">
@@ -117,14 +117,14 @@
             <div class="tot"><span>Total</span><span>Rs. {{ row.total|floatformat:0 }}</span></div>
         </div>
         <div style="margin-top:6px;">
-            <span class="vo-pay">{% if row.is_cod %}💵 Cash on Delivery &mdash; customer se cash lein{% else %}📱 {{ o.payment_method|title }} (online){% endif %}</span>
+            <span class="vo-pay">{% if row.is_cod %}💵 Cash on Delivery &mdash; collect cash from the customer{% else %}📱 {{ o.payment_method|title }} (online){% endif %}</span>
         </div>
 
         {% if o.status == 'confirmed' and o.prep_minutes %}
-            <div class="vo-note info">Aap ne tayyari ka time ~{{ o.prep_minutes }} minute bataya hai.</div>
+            <div class="vo-note info">You set the preparation time to ~{{ o.prep_minutes }} minutes.</div>
         {% endif %}
         {% if o.status == 'cancelled' and o.reject_reason %}
-            <div class="vo-note rej">Reject wajah: {{ o.reject_reason }}</div>
+            <div class="vo-note rej">Rejection reason: {{ o.reject_reason }}</div>
         {% endif %}
 
         <div class="vo-acts">
@@ -142,7 +142,7 @@
                 {% if row.delivery and row.delivery.rider %}
                     <div class="vo-note info" style="flex-basis:100%;">
                         🏍️ Rider: <b>{{ row.delivery.rider.name }}</b> ({{ row.delivery.rider.phone }}) —
-                        {% if row.delivery.status == 'assigned' %}maal lene aa raha hai{% else %}maal le kar raaste mein hai{% endif %}
+                        {% if row.delivery.status == 'assigned' %}is on the way to pick up the order{% else %}has the order and is on the way{% endif %}
                     </div>
                 {% endif %}
                 {% if not row.delivery or row.delivery.status == 'assigned' or not row.delivery.rider %}
@@ -150,7 +150,7 @@
                     <form method="post" action="{% url 'vendor_assign_rider' o.id %}" style="display:inline-flex;gap:6px;align-items:center;">
                         {% csrf_token %}
                         <select name="rider_id" required style="padding:8px;border-radius:10px;border:1px solid #cbd5e1;">
-                            <option value="">🏍️ Rider chunein</option>
+                            <option value="">🏍️ Choose rider</option>
                             {% for r in riders %}<option value="{{ r.id }}" {% if row.delivery.rider_id == r.id %}selected{% endif %}>{{ r.name }}{% if r.is_online %} 🟢{% endif %}</option>{% endfor %}
                         </select>
                         <button type="submit" class="vo-btn vo-readybtn">{% if row.delivery.rider %}Badlein{% else %}Rider do{% endif %}</button>
@@ -165,28 +165,28 @@
                 </form>
                 {% endif %}
             {% endif %}
-            {% if row.wa_url %}<a class="vo-btn vo-wa" href="{{ row.wa_url }}" target="_blank" rel="noopener"><i class="bi bi-whatsapp"></i> Customer ko WhatsApp</a>{% endif %}
+            {% if row.wa_url %}<a class="vo-btn vo-wa" href="{{ row.wa_url }}" target="_blank" rel="noopener"><i class="bi bi-whatsapp"></i> WhatsApp the customer</a>{% endif %}
             {% if row.call_phone %}<a class="vo-btn vo-call" href="tel:{{ row.call_phone }}"><i class="bi bi-telephone"></i> Call</a>{% endif %}
         </div>
 
         {% if o.status == 'pending' %}
         <form class="vo-form" id="acc-{{ o.id }}" method="post" action="{% url 'vendor_order_action' o.id 'accept' %}">
             {% csrf_token %}<input type="hidden" name="tab" value="{{ tab }}">
-            <label for="prep-{{ o.id }}">Tayyar hone mein kitne minute? (optional)</label>
-            <input type="number" id="prep-{{ o.id }}" name="prep_minutes" min="1" max="600" placeholder="jaise 20">
-            <div style="margin-top:10px;"><button type="submit" class="vo-btn vo-accept">Order qubool karein</button></div>
+            <label for="prep-{{ o.id }}">How many minutes to prepare? (optional)</label>
+            <input type="number" id="prep-{{ o.id }}" name="prep_minutes" min="1" max="600" placeholder="e.g. 20">
+            <div style="margin-top:10px;"><button type="submit" class="vo-btn vo-accept">Accept order</button></div>
         </form>
 
         <form class="vo-form" id="rej-{{ o.id }}" method="post" action="{% url 'vendor_order_action' o.id 'reject' %}">
             {% csrf_token %}<input type="hidden" name="tab" value="{{ tab }}">
-            <label for="rc-{{ o.id }}">Reject karne ki wajah (customer ko dikhegi)</label>
+            <label for="rc-{{ o.id }}">Reason for rejecting (shown to the customer)</label>
             <select id="rc-{{ o.id }}" name="reason_code" required>
-                <option value="">-- wajah chunein --</option>
+                <option value="">-- choose a reason --</option>
                 {% for code, label in reject_reasons %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
             </select>
-            <label for="rn-{{ o.id }}">Mazeed batayein (optional; "Doosri wajah" mein zaroori)</label>
+            <label for="rn-{{ o.id }}">Add details (optional; required for "Other reason")</label>
             <textarea id="rn-{{ o.id }}" name="reason_note" rows="2" maxlength="150"></textarea>
-            <div style="margin-top:10px;"><button type="submit" class="vo-btn vo-reject">Order reject karein</button></div>
+            <div style="margin-top:10px;"><button type="submit" class="vo-btn vo-reject">Reject order</button></div>
         </form>
         {% endif %}
     </div>
@@ -194,7 +194,7 @@
     {% empty %}
         <div class="vo-empty">
             <i class="bi bi-inbox" style="font-size:36px;"></i>
-            <p class="mb-0 mt-2">Is list mein abhi koi order nahi.</p>
+            <p class="mb-0 mt-2">There are no orders in this list yet.</p>
         </div>
     {% endfor %}
 </div>
@@ -227,7 +227,7 @@ function voToggle(id) {
             .then(function (d) {
                 if (d.new > known) {
                     banner.style.display = 'block';
-                    banner.textContent = '🔔 Naya order aaya hai! (' + d.new + ' naye) - dekhne ke liye tap karein';
+                    banner.textContent = '🔔 New order received! (' + d.new + ' new) - tap to view';
                     beep();
                     if (navigator.vibrate) navigator.vibrate(300);
                 }

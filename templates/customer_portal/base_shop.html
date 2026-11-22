@@ -4250,7 +4250,7 @@ function toggleVoiceSearch() {
     voiceRecognition.onerror = function(event) {
         let errorMsg = 'Error!';
         if (event.error === 'no-speech') errorMsg = 'No sound was heard.';
-        else if (event.error === 'audio-capture') errorMsg = 'Microphone nahi mila.';
+        else if (event.error === 'audio-capture') errorMsg = 'Microphone not found.';
         else if (event.error === 'not-allowed') errorMsg = 'Permission denied.';
         else if (event.error === 'network') errorMsg = 'Network error.';
         
@@ -4374,7 +4374,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <div class="pwa-ios-tip" id="pwaIosTip" role="dialog" aria-label="Install app">
     <button type="button" id="pwaIosClose" aria-label="Close">&times;</button>
-    <strong>App install karein</strong><br>
+    <strong>Install the app</strong><br>
     <span id="pwaTipText"></span>
 </div>
 <script>
@@ -4411,13 +4411,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (r && r.outcome === 'accepted') hide();
             });
         } else if (isIos) {
-            say('Safari mein neeche <b>Share</b> (&#11014;&#65039;) dabayen, phir <b>Add to Home Screen</b> chunein.');
+            say('In Safari, tap <b>Share</b> (&#11014;&#65039;) at the bottom, then choose <b>Add to Home Screen</b>.');
         } else if (inApp) {
-            say('Ye in-app browser hai. Menu (&#8942;) se <b>Open in Chrome</b> chunein, phir yahan se install karein.');
+            say('This is an in-app browser. Use the menu (&#8942;) to choose <b>Open in Chrome</b>, then install from there.');
         } else if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-            say('Install ke liye site <b>https://</b> par kholni zaroori hai.');
+            say('The site must be opened over <b>https://</b> to install.');
         } else {
-            say('Chrome ke upar <b>&#8942; (3 dots)</b> dabayen, phir <b>Install app</b> ya <b>Add to Home screen</b> chunein.<div id="pwaDiag" style="margin-top:8px;font-size:.78rem;color:#475569">Check ho raha hai...</div>');
+            say('Tap the <b>&#8942; (3 dots)</b> at the top of Chrome, then choose <b>Install app</b> or <b>Add to Home screen</b>.<div id="pwaDiag" style="margin-top:8px;font-size:.78rem;color:#475569">Checking...</div>');
             runDiag();
         }
     });
@@ -4436,16 +4436,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 return fetch(ic.src).then(function (r) {
                     var ct = r.headers.get('content-type') || '';
                     ok(r.ok && ct.indexOf('image') === 0, 'icon ' + ic.sizes + ' ' + r.status + ' ' + ct.split(';')[0]);
-                }).catch(function () { ok(false, 'icon ' + ic.sizes + ' load nahi hua'); });
+                }).catch(function () { ok(false, 'icon ' + ic.sizes + ' failed to load'); });
             }));
         }).catch(function (e) { ok(false, 'manifest error'); })
-        .then(function () { return fetch('/serviceworker.js?v=3').then(function (r) { return r.text(); }).then(function (t) { ok(t.indexOf('OFFLINE_HTML') !== -1, 'serviceworker.js naya version'); }); })
+        .then(function () { return fetch('/serviceworker.js?v=3').then(function (r) { return r.text(); }).then(function (t) { ok(t.indexOf('OFFLINE_HTML') !== -1, 'serviceworker.js new version'); }); })
         .catch(function () { ok(false, 'serviceworker.js fetch error'); })
         .then(function () { return navigator.serviceWorker.getRegistration('/'); })
         .then(function (reg) {
             ok(!!reg, 'SW registered');
             ok(!!(reg && reg.active), 'SW active' + (reg && reg.active ? ' (' + reg.active.state + ')' : ''));
-            ok(!!navigator.serviceWorker.controller, 'Page SW ke control mein (na ho to page reload karein)');
+            ok(!!navigator.serviceWorker.controller, 'Page is controlled by the service worker (reload the page if not)');
         }).catch(function () { ok(false, 'SW check error'); })
         .then(done);
     }

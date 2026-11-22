@@ -663,7 +663,7 @@ def store_closed_message(product):
         return None
     vp = getattr(product.vendor, 'portal_profile', None)
     if vp is not None and not vp.is_open_now:
-        return f'{vp.business_name} abhi band hai, baad mein order karein.'
+        return f'{vp.business_name} is closed right now, please order later.'
     return None
 
 
@@ -1259,8 +1259,8 @@ def add_to_cart(request):
                     'cart_conflict': True,
                     'current_store': store_orders.store_name(current_store),
                     'new_store': store_orders.store_name(new_store),
-                    'message': (f'Aap ke cart mein "{store_orders.store_name(current_store)}" ka maal hai. '
-                                f'Purana cart khali karun?'),
+                    'message': (f'Your cart has items from "{store_orders.store_name(current_store)}". '
+                                f'Clear the old cart?'),
                 })
             cart = {}
         
@@ -2062,7 +2062,7 @@ def cancel_order_customer(request, order_id):
     if order.vendor_id and order.status == 'confirmed':
         return JsonResponse({
             'success': False,
-            'message': 'Store order qubool kar chuka hai. Cancel ke liye store se rabta karein.'
+            'message': 'The store has already accepted this order. Please contact the store to cancel.'
         })
     if order.status not in cancellable_statuses:
         return JsonResponse({

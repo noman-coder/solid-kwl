@@ -363,7 +363,7 @@
                             <h5 class="mb-1"><strong>Trusted Customer</strong></h5>
                             <div class="small">
                                 You are a trusted customer. <strong>OTP is not required</strong> — 
-                                direct order place karein!
+                                place your order directly!
                             </div>
                         </div>
                     </div>
@@ -408,7 +408,7 @@
                             <div id="otp-input-box" style="display: none;">
                                 
                                 <div class="alert alert-info mb-3" role="alert">
-                                    <strong><i class="bi bi-bookmark-star-fill"></i> IMPORTANT: Aapka Order Token</strong>
+                                    <strong><i class="bi bi-bookmark-star-fill"></i> IMPORTANT: Your Order Token</strong>
                                     <div id="token-value" class="token-display my-2">--------</div>
                                     <small>
                                         📌 <strong>Save this token</strong>! 
@@ -674,7 +674,7 @@ function sendOTP() {
                 document.getElementById('otp-alert').innerHTML = 
                     '<i class="bi bi-check-circle-fill"></i> ' +
                     '<strong>OTP sent to your email!</strong> ' +
-                    '<div class="small mt-1">Enter the 6-digit code below. <strong>5 minute valid hai.</strong></div>';
+                    '<div class="small mt-1">Enter the 6-digit code below. <strong>Valid for 5 minutes.</strong></div>';
                 document.getElementById('otp-alert').className = 'alert alert-success mb-3';
                 
                 document.getElementById('otp-code').focus();

@@ -100,14 +100,14 @@
     {% if not profile.is_approved %}
         <div class="vd-alert warn" style="margin-top:20px;">
             <i class="bi bi-hourglass-split"></i>
-            Aap ka vendor account admin approval ke intezar mein hai. Approve hote hi aap products list kar sakenge.
+            Your vendor account is waiting for admin approval. You can list products as soon as it is approved.
         </div>
     {% endif %}
 
     {% if profile.is_approved and not profile.location_verified %}
         <div class="vd-alert info" style="margin-top:20px;">
             <i class="bi bi-geo-alt"></i>
-            <b>Verify your store location</b> to get a blue tick <span style="display:inline-block;vertical-align:middle;">{% include 'customer_portal/_verified_tick.html' %}</span> after your store name. Nazdeek ke customers ko aap ka store pehle dikhega.
+            <b>Verify your store location</b> to get a blue tick <span style="display:inline-block;vertical-align:middle;">{% include 'customer_portal/_verified_tick.html' %}</span> after your store name. Nearby customers will see your store first.
             <a href="{% url 'vendor_location_verify' %}" style="font-weight:700;">Verify now &rarr;</a>
         </div>
     {% endif %}
@@ -123,13 +123,13 @@
         <div class="vd-stat"><b>{{ earnings.units|floatformat:"-2" }}</b>Units Sold</div>
         <div class="vd-stat"><b>Rs. {{ earnings.sales|floatformat:0 }}</b>Total Sales</div>
         <div class="vd-stat"><b style="color:#dc3545;">Rs. {{ earnings.commission|floatformat:0 }}</b>Shop Commission ({{ commission_percent|floatformat:"-2" }}%)</div>
-        <div class="vd-stat"><b style="color:#28a745;">Rs. {{ earnings.payable|floatformat:0 }}</b>Aap ka Hissa</div>
+        <div class="vd-stat"><b style="color:#28a745;">Rs. {{ earnings.payable|floatformat:0 }}</b>Your Share</div>
     </div>
 
     <div class="vd-card">
-        <h5 style="margin:0 0 8px;">⭐ Customer ki rating:
+        <h5 style="margin:0 0 8px;">⭐ Customer rating:
             {% if rating.avg %}<b style="color:#f59e0b;">{{ rating.avg }}/5</b> <small>({{ rating.count }} reviews)</small>
-            {% else %}<small>abhi koi rating nahi</small>{% endif %}</h5>
+            {% else %}<small>no ratings yet</small>{% endif %}</h5>
         {% for rv in recent_reviews %}
             <div style="border-top:1px dashed #e5e7eb;padding:8px 0;">
                 <b style="color:#f59e0b;">{{ rv.vendor_rating }} ★</b>
@@ -185,8 +185,8 @@
                 </tr>
             {% empty %}
                 <tr class="vd-empty"><td colspan="6" style="text-align:center;padding:40px;color:#888;">
-                    Abhi koi product list nahi hua.
-                    {% if profile.is_approved %}<br><a href="{% url 'vendor_product_add' %}">Pehle products add karein</a>{% endif %}
+                    No products listed yet.
+                    {% if profile.is_approved %}<br><a href="{% url 'vendor_product_add' %}">Add your first products</a>{% endif %}
                 </td></tr>
             {% endfor %}
             </tbody>

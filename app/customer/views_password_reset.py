@@ -20,9 +20,9 @@ from .views_customer_auth import is_valid_phone, normalize_phone
 logger = logging.getLogger(__name__)
 
 SESSION_KEY = 'fp_phone'
-GENERIC_MSG = ('Agar yeh phone registered hai to 6-digit code bhej diya gaya hai (WhatsApp ya email par, '
-               '5 minute valid). Spam folder bhi dekh lein.')
-TOO_MANY_MSG = '❌ Bohat zyada koshishen. Thori der baad dobara try karein.'
+GENERIC_MSG = ('If this phone number is registered, a 6-digit code has been sent (on WhatsApp or email, '
+               'valid for 5 minutes). Please also check your spam folder.')
+TOO_MANY_MSG = '❌ Too many attempts. Please try again after some time.'
 
 
 def _company_name():
@@ -36,7 +36,7 @@ def forgot_password(request):
     if request.method == 'POST':
         phone_raw = request.POST.get('phone', '').strip()[:20]
         if not phone_raw or not is_valid_phone(phone_raw):
-            messages.error(request, '❌ Sahi phone number likhein (03XXXXXXXXX)')
+            messages.error(request, '❌ Enter a valid phone number (03XXXXXXXXX)')
             return redirect('customer_forgot_password')
         phone = normalize_phone(phone_raw)
         ip = get_client_ip(request) or ''
@@ -66,7 +66,7 @@ def reset_password(request):
     """Step 2: 6-digit code + naya password."""
     phone = request.session.get(SESSION_KEY)
     if not phone:
-        messages.info(request, 'Pehle apna phone number likhein.')
+        messages.info(request, 'Please enter your phone number first.')
         return redirect('customer_forgot_password')
 
     if request.method == 'POST':
@@ -79,7 +79,7 @@ def reset_password(request):
 
         account = pr.find_account(phone, pr.SHOP_KINDS)
         if not account:
-            messages.error(request, '❌ Code ghalat ya expire ho chuka hai.')
+            messages.error(request, '❌ The code is wrong or has expired.')
             return redirect('customer_reset_password')
 
         ok, msg = pr.complete_reset(account, code, request.POST.get('password', ''),

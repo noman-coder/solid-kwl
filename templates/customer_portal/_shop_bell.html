@@ -46,7 +46,7 @@
     function setBadge(n) { badge.textContent = n > 99 ? '99+' : n; badge.style.display = n > 0 ? 'block' : 'none'; }
     function refreshCount() { api('/api/notifications/unread-count/').then(function (d) { setBadge(d.unread_count || 0); }).catch(function () {}); }
     function render(items) {
-        if (!items || !items.length) { list.innerHTML = '<div class="sb-empty">Koi notification nahi</div>'; return; }
+        if (!items || !items.length) { list.innerHTML = '<div class="sb-empty">No notifications</div>'; return; }
         list.innerHTML = items.map(function (n) {
             return '<div class="sb-item ' + (n.is_read ? '' : 'unread') + '" data-id="' + n.id + '" data-link="' + esc(n.link || '') + '">' +
                 '<div class="t">' + esc(n.title) + '</div><div class="m">' + esc((n.message || '').substring(0, 160)) + '</div>' +
@@ -55,7 +55,7 @@
     }
     function load() {
         api('/api/notifications/').then(function (d) { render(d.notifications); setBadge(d.unread_count || 0); })
-            .catch(function () { list.innerHTML = '<div class="sb-empty">Notifications load nahi huin</div>'; });
+            .catch(function () { list.innerHTML = '<div class="sb-empty">Could not load notifications</div>'; });
     }
     btn.addEventListener('click', function (e) {
         e.stopPropagation();

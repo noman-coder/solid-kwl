@@ -149,13 +149,13 @@
 
     {% if store.delivery_areas %}<div class="sd-desc"><i class="bi bi-geo-alt-fill" style="color:#2563eb"></i> <b>Delivers to:</b> {{ store.delivery_areas }}</div>{% endif %}
     {% if store.store_description %}<div class="sd-desc">{{ store.store_description|linebreaksbr }}</div>{% endif %}
-    {% if status == 'closed' %}<div class="sd-alert"><i class="bi bi-moon"></i> Ye store abhi band hai. Aap products dekh sakte hain, order store khulne par hoga.</div>
-    {% elif status == 'busy' %}<div class="sd-alert busy"><i class="bi bi-hourglass-split"></i> Store abhi busy hai, delivery mein kuch der lag sakti hai.</div>{% endif %}
+    {% if status == 'closed' %}<div class="sd-alert"><i class="bi bi-moon"></i> This store is closed right now. You can browse products; orders open when the store reopens.</div>
+    {% elif status == 'busy' %}<div class="sd-alert busy"><i class="bi bi-hourglass-split"></i> The store is busy right now, so delivery may take a little longer.</div>{% endif %}
   </div>
 
   <form class="sd-search" method="get">
     {% if selected_category %}<input type="hidden" name="category" value="{{ selected_category }}">{% endif %}
-    <input type="text" name="q" value="{{ search }}" placeholder="Is store mein search karein...">
+    <input type="text" name="q" value="{{ search }}" placeholder="Search in this store...">
     <button type="submit" aria-label="Search"><i class="bi bi-search"></i></button>
   </form>
 
@@ -193,9 +193,9 @@
             {% else %}
               <button class="sd-add" type="button" onclick="cartAdd({{ p.id }})"><i class="bi bi-plus-lg"></i> Add</button>
               <div class="sd-step">
-                <button type="button" onclick="cartSet({{ p.id }}, -1)" aria-label="Kam karein">&minus;</button>
+                <button type="button" onclick="cartSet({{ p.id }}, -1)" aria-label="Decrease">&minus;</button>
                 <span class="q">{{ p.cart_qty }}</span>
-                <button type="button" class="plus" onclick="cartSet({{ p.id }}, 1)" aria-label="Zyada karein">+</button>
+                <button type="button" class="plus" onclick="cartSet({{ p.id }}, 1)" aria-label="Increase">+</button>
               </div>
             {% endif %}
           </div>
@@ -213,7 +213,7 @@
     </div>
     {% endif %}
   {% else %}
-    <div class="sd-empty"><i class="bi bi-bag-x" style="font-size:40px;"></i><p class="mt-2">Is store mein koi product nahi mila.</p></div>
+    <div class="sd-empty"><i class="bi bi-bag-x" style="font-size:40px;"></i><p class="mt-2">No products found in this store.</p></div>
   {% endif %}
 
   <div id="reviews" style="margin-top:28px;background:#fff;border-radius:16px;padding:18px;box-shadow:0 2px 10px rgba(0,0,0,.06);">
@@ -245,7 +245,7 @@
       {% endif %}
     {% endfor %}
     {% else %}
-    <p style="color:#6b7280;margin:0;">Abhi koi rating nahi. Pehla order dein aur rating likhein!</p>
+    <p style="color:#6b7280;margin:0;">No ratings yet. Place the first order and leave a rating!</p>
     {% endif %}
   </div>
 </div>
@@ -302,7 +302,7 @@
     document.getElementById('cbTotal').textContent = money(total);
     var min = document.getElementById('cbMin');
     if (MIN_ORDER > 0 && total < MIN_ORDER) {
-      min.textContent = 'Minimum order ' + money(MIN_ORDER) + ' hai. ' + money(MIN_ORDER - total) + ' ka aur maal add karein.';
+      min.textContent = 'Minimum order is ' + money(MIN_ORDER) + '. Add ' + money(MIN_ORDER - total) + ' more.';
       min.classList.add('show');
     } else { min.classList.remove('show'); }
     var badge = document.querySelector('.cart-count, #cartCount, .cart-badge');
@@ -325,7 +325,7 @@
       var cur = cart[id] ? cart[id].qty : 0;
       cart[id] = { qty: cur + 1, price: priceOf(id) };
       paintAll();
-    }).catch(function () { lock(id, false); toast('Network error, dobara koshish karein'); });
+    }).catch(function () { lock(id, false); toast('Network error, please try again'); });
   };
 
   window.cartSet = function (id, delta) {
@@ -337,7 +337,7 @@
       if (!d.success) { toast(d.message || 'Kuch masla aa gaya'); return; }
       if (next === 0) { delete cart[id]; } else { cart[id] = { qty: next, price: cart[id] ? cart[id].price : priceOf(id) }; }
       paintAll();
-    }).catch(function () { lock(id, false); toast('Network error, dobara koshish karein'); });
+    }).catch(function () { lock(id, false); toast('Network error, please try again'); });
   };
 
   paintAll();

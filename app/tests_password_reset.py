@@ -132,7 +132,7 @@ class ShopResetTests(TestCase):
         for _ in range(pr.PER_PHONE_VERIFY + 1):
             ok, last = pr.complete_reset(account, '000000', NEW_PW, NEW_PW, ip='1.2.3.4')
             self.assertFalse(ok)
-        self.assertIn('Bohat zyada', last)
+        self.assertIn('Too many attempts', last)
         self.assertTrue(OTPAuditLog.objects.filter(phone=self.PHONE, action='locked').exists())
 
 

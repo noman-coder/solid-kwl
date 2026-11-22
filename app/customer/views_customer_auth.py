@@ -361,7 +361,7 @@ def customer_register(request):
             # ✅ WELCOME MESSAGE WITH SHOP GREETING
             messages.success(
                 request, 
-                f'🎉 Welcome {customer.name}! Shop par khush aamdeed.'
+                f'🎉 Welcome {customer.name}!'
             )
             return redirect('shop_home')   # ✅ CHANGE: my_account → shop_home
             
@@ -430,7 +430,7 @@ def customer_login(request):
                 # ✅ WELCOME MESSAGE WITH SHOP GREETING
                 messages.success(
                     request, 
-                    f'🎉 Welcome back, {customer.name}! Shop par khush aamdeed.'
+                    f'🎉 Welcome back, {customer.name}!'
                 )
                 
                 if next_url and next_url.startswith('/'):
@@ -438,7 +438,7 @@ def customer_login(request):
                 
                 return redirect('shop_home')   # ✅ CHANGE: my_account → shop_home
             else:
-                messages.error(request, '❌ Ghalat password')
+                messages.error(request, '❌ Wrong password')
                 return redirect('customer_login')
                 
         except Exception as e:

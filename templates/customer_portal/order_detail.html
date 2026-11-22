@@ -57,11 +57,11 @@
     <div class="alert alert-light border mb-3">
         <b><i class="bi bi-shop"></i> {{ store_name }}</b>
         {% if order.status == 'confirmed' and order.prep_minutes %}
-            <span class="d-block small text-muted">Store ne order qubool kar liya &middot; tayyar hone mein ~{{ order.prep_minutes }} minute</span>
+            <span class="d-block small text-muted">The store accepted your order &middot; ready in ~{{ order.prep_minutes }} minutes</span>
         {% elif order.status == 'ready' %}
-            <span class="d-block small text-success">Aap ka maal tayyar hai 📦</span>
+            <span class="d-block small text-success">Your order is ready 📦</span>
         {% elif order.status == 'pending' %}
-            <span class="d-block small text-muted">Store ke jawab ka intezar hai...</span>
+            <span class="d-block small text-muted">Waiting for the store to respond...</span>
         {% endif %}
     </div>
     {% endif %}
@@ -69,12 +69,12 @@
     {% if store_rejected %}
     <div class="card border-danger shadow-sm mb-4">
         <div class="card-body">
-            <h6 class="fw-bold text-danger mb-2">❌ {{ store_name }} ne order qubool nahi kiya</h6>
-            <p class="mb-2"><b>Wajah:</b> {{ order.reject_reason }}</p>
+            <h6 class="fw-bold text-danger mb-2">❌ {{ store_name }} did not accept the order</h6>
+            <p class="mb-2"><b>Reason:</b> {{ order.reject_reason }}</p>
             <p class="mb-0 small text-muted">💰 {{ refund_note }}</p>
             {% if suggested_stores %}
             <hr>
-            <div class="fw-bold mb-2">Aap in stores se order kar sakte hain:</div>
+            <div class="fw-bold mb-2">You can order from these stores:</div>
             <div class="d-flex flex-column gap-2">
                 {% for st in suggested_stores %}
                 <a href="{% url 'store_detail' st.pk %}" class="btn btn-outline-primary text-start">
@@ -84,7 +84,7 @@
                 {% endfor %}
             </div>
             {% endif %}
-            <a href="{% url 'store_list' %}" class="btn btn-link px-0 mt-2">Saare stores dekhein</a>
+            <a href="{% url 'store_list' %}" class="btn btn-link px-0 mt-2">View all stores</a>
         </div>
     </div>
     {% endif %}
@@ -106,28 +106,28 @@
       .rv-stars input:checked ~ label,.rv-stars label:hover,.rv-stars label:hover ~ label{color:#f59e0b}
     </style>
     <div class="card border-0 shadow-sm mb-4"><div class="card-body">
-      <h5 class="mb-3">⭐ Apna tajurba bataein</h5>
+      <h5 class="mb-3">⭐ Share your experience</h5>
       <form method="post" action="{% url 'rate_order' order.id %}">{% csrf_token %}
         {% if is_store_order %}
         <div class="mb-3">
           <div class="fw-semibold mb-1">🏪 {{ store_name }}</div>
           <div class="rv-stars">{% for i in "54321" %}<input type="radio" id="vr{{ i }}" name="vendor_rating" value="{{ i }}"><label for="vr{{ i }}">★</label>{% endfor %}</div>
-          <input class="form-control mt-2" name="vendor_comment" maxlength="300" placeholder="Maal/store ke bare mein likhein (optional)">
+          <input class="form-control mt-2" name="vendor_comment" maxlength="300" placeholder="Write about the products/store (optional)">
         </div>
         {% endif %}
         {% if review_rider %}
         <div class="mb-3">
           <div class="fw-semibold mb-1">🏍️ Rider: {{ review_rider.name }}</div>
           <div class="rv-stars">{% for i in "54321" %}<input type="radio" id="rr{{ i }}" name="rider_rating" value="{{ i }}"><label for="rr{{ i }}">★</label>{% endfor %}</div>
-          <input class="form-control mt-2" name="rider_comment" maxlength="300" placeholder="Delivery ke bare mein likhein (optional)">
+          <input class="form-control mt-2" name="rider_comment" maxlength="300" placeholder="Write about the delivery (optional)">
         </div>
         {% endif %}
-        <button class="btn btn-primary w-100">Rating bhejein</button>
+        <button class="btn btn-primary w-100">Submit rating</button>
       </form>
     </div></div>
     {% elif review %}
     <div class="card border-0 shadow-sm mb-4"><div class="card-body">
-      <h6 class="mb-2">⭐ Aap ki rating</h6>
+      <h6 class="mb-2">⭐ Your rating</h6>
       {% if review.vendor_rating %}<div>🏪 {{ store_name }}: <b style="color:#f59e0b">{{ review.vendor_rating }}/5 ★</b>{% if review.vendor_comment %} — {{ review.vendor_comment }}{% endif %}</div>{% endif %}
       {% if review.rider_rating %}<div>🏍️ Rider: <b style="color:#f59e0b">{{ review.rider_rating }}/5 ★</b>{% if review.rider_comment %} — {{ review.rider_comment }}{% endif %}</div>{% endif %}
     </div></div>

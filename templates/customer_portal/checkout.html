@@ -676,8 +676,8 @@
             <div class="alert alert-danger mb-3">🔒 {{ store.closed_message }}</div>
             {% elif not store.min_ok %}
             <div class="alert alert-warning mb-3">
-                ⚠️ Minimum order Rs. {{ store.min_order|floatformat:0 }} hai. Aur <b>Rs. {{ store.short_by|floatformat:0 }}</b> ka maal add karein.
-                <a href="{% url 'cart_view' %}" class="alert-link">Cart par wapas jayein</a>
+                ⚠️ Minimum order is Rs. {{ store.min_order|floatformat:0 }}. Add <b>Rs. {{ store.short_by|floatformat:0 }}</b> more to continue.
+                <a href="{% url 'cart_view' %}" class="alert-link">Back to cart</a>
             </div>
             {% endif %}
             {% endif %}
@@ -696,7 +696,7 @@
                         <div class="free-progress-box">
                             <h6>
                                 <i class="bi bi-gift-fill"></i>
-                                Aur Rs. {{ free_delivery_progress.remaining|floatformat:0 }} add karein → FREE Delivery!
+                                Add Rs. {{ free_delivery_progress.remaining|floatformat:0 }} more → FREE Delivery!
                             </h6>
                             <div class="free-progress-bar">
                                 <div class="free-progress-fill" style="width: {{ free_delivery_progress.percent }}%;"></div>
@@ -782,22 +782,22 @@
 
                     {% if payment_numbers.jazzcash %}
                     <div class="pay-number" data-for="jazzcash" style="display:none; margin-top:10px; padding:14px; border:2px dashed #d97706; border-radius:12px; background:#fffbeb;">
-                        <div class="small text-muted">📱 JazzCash par is number par payment bhejein:</div>
+                        <div class="small text-muted">📱 Send the payment to this JazzCash number:</div>
                         <div class="d-flex align-items-center justify-content-between gap-2">
                             <div class="fw-bold" style="font-size:22px; letter-spacing:1px;" id="num_jazzcash">{{ payment_numbers.jazzcash }}</div>
                             <button type="button" class="btn btn-sm btn-outline-dark" onclick="copyPayNumber('num_jazzcash', this)">Copy</button>
                         </div>
-                        <div class="small text-muted mt-1">{{ company.name }} &bull; Payment bhejne ke baad order karein. Rider ko ya shop ko transaction ID/screenshot dikha dein.</div>
+                        <div class="small text-muted mt-1">{{ company.name }} &bull; Place the order after sending the payment. Show the transaction ID/screenshot to the rider or the shop.</div>
                     </div>
                     {% endif %}
                     {% if payment_numbers.easypaisa %}
                     <div class="pay-number" data-for="easypaisa" style="display:none; margin-top:10px; padding:14px; border:2px dashed #059669; border-radius:12px; background:#ecfdf5;">
-                        <div class="small text-muted">📱 EasyPaisa par is number par payment bhejein:</div>
+                        <div class="small text-muted">📱 Send the payment to this EasyPaisa number:</div>
                         <div class="d-flex align-items-center justify-content-between gap-2">
                             <div class="fw-bold" style="font-size:22px; letter-spacing:1px;" id="num_easypaisa">{{ payment_numbers.easypaisa }}</div>
                             <button type="button" class="btn btn-sm btn-outline-dark" onclick="copyPayNumber('num_easypaisa', this)">Copy</button>
                         </div>
-                        <div class="small text-muted mt-1">{{ company.name }} &bull; Payment bhejne ke baad order karein. Rider ko ya shop ko transaction ID/screenshot dikha dein.</div>
+                        <div class="small text-muted mt-1">{{ company.name }} &bull; Place the order after sending the payment. Show the transaction ID/screenshot to the rider or the shop.</div>
                     </div>
                     {% endif %}
                 </div>
@@ -1018,7 +1018,7 @@
             
             <div class="modal-header address-modal-header">
                 <h5 id="changeAddressModalLabel">
-                    <i class="bi bi-geo-alt-fill"></i> Delivery Address Update Karein
+                    <i class="bi bi-geo-alt-fill"></i> Update Delivery Address
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
@@ -1046,7 +1046,7 @@
                         <small class="text-muted d-block mt-1">
                             <i class="bi bi-info-circle"></i> To change the name 
                             <a href="{% url 'my_account' %}" style="color: #2563eb; font-weight: 700; text-decoration: none;">Profile</a> 
-                            page par jayein
+                            page.
                         </small>
                     </div>
                     
@@ -1153,7 +1153,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!STORE_BLOCKED) return;
     ['trustedPlaceOrderBtn', 'verifiedPlaceOrderBtn'].forEach(function (id) {
         var b = document.getElementById(id);
-        if (b) { b.disabled = true; b.style.opacity = '.55'; b.title = 'Store ki shart poori nahi hui'; }
+        if (b) { b.disabled = true; b.style.opacity = '.55'; b.title = 'Store requirement not met'; }
     });
 });
 
@@ -1341,7 +1341,7 @@ function saveAddress() {
     const landmark = document.getElementById('inputLandmark').value.trim();
     
     if (!address) {
-        showAddressError('❌ Complete address zaroori hai');
+        showAddressError('❌ Complete address is required');
         document.getElementById('inputAddress').focus();
         return;
     }
@@ -1353,7 +1353,7 @@ function saveAddress() {
     }
     
     if (!city) {
-        showAddressError('❌ City zaroori hai');
+        showAddressError('❌ City is required');
         document.getElementById('inputCity').focus();
         return;
     }
@@ -1482,7 +1482,7 @@ function placeOrderTrusted() {
                 window.location.href = data.redirect_url;
             }, 500);
         } else {
-            alert('❌ ' + (data.message || 'Order place nahi hua'));
+            alert('❌ ' + (data.message || 'Order could not be placed'));
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
