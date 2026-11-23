@@ -250,7 +250,15 @@ def store_detail(request, pk):
     if customer_loc and store.has_location:
         distance_text = format_distance(haversine_km(customer_loc[0], customer_loc[1], store.latitude, store.longitude))
 
+    # Favorite store (dil) + is store par chalne wale coupons
+    from . import coupons as coupon_engine
+    from .views_extras import favorite_store_ids
+    profile = getattr(request.user, 'customer_profile', None) if request.user.is_authenticated else None
+    store_coupons = coupon_engine.available_for_customer(profile.customer if profile else None, store_id=store.vendor_id)[:3]
+
     return render(request, 'customer_portal/store_detail.html', {
+        'is_favorite': store.pk in favorite_store_ids(request),
+        'store_coupons': store_coupons,
         'reviews': store_reviews(store.vendor),
         'distance_text': distance_text,
         'location_prompt': customer_loc is None,

@@ -1,0 +1,110 @@
+{% extends 'customer_portal/base_shop.html' %}
+{% block bottom_nav %}{% endblock %}
+{% load static %}
+
+{% block title %}Coupons - {{ company_name }}{% endblock %}
+
+{% block content %}
+<style>
+    body { background: #f3f5ff; }
+    .vc-wrap { max-width: 1000px; margin: 24px auto; padding: 0 12px; }
+    .vc-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .vc-top h3 { margin: 0; font-weight: 700; }
+    .vc-btn { text-decoration: none; border: 1px solid #ddd; background: #fff; border-radius: 22px; padding: 7px 16px; color: #333; font-weight: 600; display: inline-block; cursor: pointer; }
+    .vc-btn.pri { background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); color: #fff; border: 0; }
+    .vc-btn.danger { color: #dc3545; border-color: #f5c2c7; }
+    .vc-card { background: #fff; border-radius: 20px; padding: 18px; box-shadow: 0 6px 20px rgba(0,0,0,.06); margin-bottom: 16px; }
+    .vc-card h5 { margin: 0 0 12px; font-weight: 700; }
+    .vc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+    .vc-grid label { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 3px; }
+    .vc-grid input, .vc-grid select { width: 100%; border: 1px solid #d9dce8; border-radius: 12px; padding: 8px 10px; background: #fff; }
+    .vc-err { background: #fef2f2; color: #991b1b; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
+    .vc-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+    .vc-row:last-child { border-bottom: 0; }
+    .vc-code { font-family: monospace; font-weight: 800; font-size: 16px; letter-spacing: 1px; }
+    .vc-meta { color: #6b7280; font-size: 13px; }
+    .vc-st { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 10px; margin-left: 6px; }
+    .vc-st.active { background: #dcfce7; color: #166534; } .vc-st.paused { background: #e5e7eb; color: #374151; }
+    .vc-st.scheduled { background: #dbeafe; color: #1e40af; } .vc-st.expired, .vc-st.used_up { background: #fee2e2; color: #991b1b; }
+    .vc-kpi { background: #fff; border-radius: 20px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,.06); text-align: center; margin-bottom: 16px; }
+    .vc-kpi b { display: block; font-size: 22px; } .vc-kpi small { color: #777; }
+    .vc-actions form { display: inline; }
+</style>
+
+<div class="vc-wrap">
+    <div class="vc-top">
+        <h3><i class="bi bi-ticket-perforated"></i> Coupons</h3>
+        <a href="{% url 'vendor_dashboard' %}" class="vc-btn"><i class="bi bi-arrow-left"></i> Dashboard</a>
+    </div>
+
+    <div class="vc-kpi">
+        <b>Rs. {{ total_given|floatformat:0 }}</b>
+        <small>Coupons se customers ko ab tak mila discount (cancelled orders ke baghair) &mdash; yeh raqam aap ke hisaab se minha hogi</small>
+    </div>
+
+    <div class="vc-card">
+        <h5>Naya coupon</h5>
+        {% if errors %}<div class="vc-err">{% for e in errors %}<div>&bull; {{ e }}</div>{% endfor %}</div>{% endif %}
+        <form method="post" autocomplete="off">
+            {% csrf_token %}
+            <div class="vc-grid">
+                <div><label>Code *</label><input name="code" maxlength="20" placeholder="WELCOME50" value="{{ form.code }}" style="text-transform:uppercase;" required></div>
+                <div><label>Qism *</label>
+                    <select name="discount_type" id="vcType">
+                        <option value="percent" {% if form.discount_type == 'percent' %}selected{% endif %}>Percent (%)</option>
+                        <option value="fixed" {% if form.discount_type == 'fixed' %}selected{% endif %}>Fixed Rs.</option>
+                        <option value="free_delivery" {% if form.discount_type == 'free_delivery' %}selected{% endif %}>Free delivery</option>
+                    </select></div>
+                <div id="vcValueBox"><label>Miqdar (% ya Rs.)</label><input name="value" type="number" step="0.01" min="0" value="{{ form.value }}"></div>
+                <div id="vcMaxBox"><label>Max discount Rs. (optional)</label><input name="max_discount" type="number" step="0.01" min="0" value="{{ form.max_discount }}"></div>
+                <div><label>Minimum order Rs.</label><input name="min_order" type="number" step="0.01" min="0" value="{{ form.min_order }}" placeholder="0"></div>
+                <div><label>Kul istemal (optional)</label><input name="usage_limit" type="number" min="1" value="{{ form.usage_limit }}" placeholder="be-had"></div>
+                <div><label>Har customer kitni dafa</label><input name="per_customer_limit" type="number" min="0" value="{{ form.per_customer_limit|default:'1' }}"></div>
+                <div><label>Shuru (optional)</label><input name="valid_from" type="date" value="{{ form.valid_from }}"></div>
+                <div><label>Khatam (optional)</label><input name="valid_until" type="date" value="{{ form.valid_until }}"></div>
+                <div style="grid-column: 1 / -1;"><label>Customer ko dikhne wali line (optional)</label><input name="title" maxlength="80" placeholder="Pehle order par 20% off" value="{{ form.title }}"></div>
+                <div style="grid-column: 1 / -1;"><label style="font-weight:500;"><input type="checkbox" name="first_order_only" style="width:auto;" {% if form.first_order_only %}checked{% endif %}> Sirf naye customer ke pehle order par</label></div>
+            </div>
+            <button type="submit" class="vc-btn pri" style="margin-top:14px;"><i class="bi bi-plus-circle"></i> Coupon banayein</button>
+        </form>
+    </div>
+
+    <div class="vc-card">
+        <h5>Mere coupons</h5>
+        {% for r in rows %}
+        <div class="vc-row">
+            <div>
+                <span class="vc-code">{{ r.c.code }}</span><span class="vc-st {{ r.status }}">{% if r.status == 'used_up' %}Used up{% else %}{{ r.status|title }}{% endif %}</span>
+                <div class="vc-meta">
+                    {{ r.c.short_label }}
+                    {% if r.c.min_order > 0 %}&middot; Min Rs. {{ r.c.min_order|floatformat:0 }}{% endif %}
+                    {% if r.c.first_order_only %}&middot; Naye customer{% endif %}
+                    {% if r.c.valid_until %}&middot; {{ r.c.valid_until|date:"d M Y" }} tak{% endif %}
+                </div>
+                <div class="vc-meta">Istemal: <b>{{ r.used }}</b>{% if r.c.usage_limit %} / {{ r.c.usage_limit }}{% endif %} &middot; Discount diya: <b>Rs. {{ r.given|floatformat:0 }}</b></div>
+            </div>
+            <div class="vc-actions">
+                <form method="post" action="{% url 'vendor_coupon_toggle' r.c.id %}">{% csrf_token %}
+                    <button class="vc-btn" type="submit">{% if r.c.is_active %}Band karein{% else %}Chalu karein{% endif %}</button></form>
+                <form method="post" action="{% url 'vendor_coupon_delete' r.c.id %}" onsubmit="return confirm('Yeh coupon delete karein?');">{% csrf_token %}
+                    <button class="vc-btn danger" type="submit"><i class="bi bi-trash"></i></button></form>
+            </div>
+        </div>
+        {% empty %}
+        <div class="vc-meta" style="text-align:center;padding:18px 0;">Abhi koi coupon nahi. Upar se pehla coupon banayein.</div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+(function () {
+    var t = document.getElementById('vcType');
+    function sync() {
+        var free = t.value === 'free_delivery';
+        document.getElementById('vcValueBox').style.display = free ? 'none' : '';
+        document.getElementById('vcMaxBox').style.display = t.value === 'percent' ? '' : 'none';
+    }
+    t.addEventListener('change', sync); sync();
+})();
+</script>
+{% endblock %}

@@ -52,6 +52,7 @@ class SaleOrder(models.Model):
         help_text="Khali = shop ka apna order. Bhara = is store ke dashboard par dikhega."
     )
     delivery_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    coupon_code = models.CharField(max_length=30, blank=True, default='')
     payment_method = models.CharField(max_length=20, blank=True, default='')
     prep_minutes = models.PositiveSmallIntegerField(
         null=True, blank=True, help_text="Vendor accept karte waqt batata hai: tayyar hone mein kitne minute")

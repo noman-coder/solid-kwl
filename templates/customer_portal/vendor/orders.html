@@ -114,6 +114,7 @@
         <div class="vo-sum">
             <div><span>Items</span><span>Rs. {{ row.subtotal|floatformat:0 }}</span></div>
             <div><span>Delivery fee</span><span>Rs. {{ o.delivery_fee|floatformat:0 }}</span></div>
+            {% if o.discount_value > 0 %}<div><span>🎟️ Coupon{% if o.coupon_code %} {{ o.coupon_code }}{% endif %}</span><span>- Rs. {{ o.discount_value|floatformat:0 }}</span></div>{% endif %}
             <div class="tot"><span>Total</span><span>Rs. {{ row.total|floatformat:0 }}</span></div>
         </div>
         <div style="margin-top:6px;">

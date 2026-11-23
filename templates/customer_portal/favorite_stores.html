@@ -1,0 +1,83 @@
+{% extends 'customer_portal/base_shop.html' %}
+{% load static %}
+
+{% block title %}Favorite Stores - {{ company_name }}{% endblock %}
+
+{% block content %}
+<style>
+    .fs-wrap { max-width: 900px; margin: 24px auto; padding: 0 12px; }
+    .fs-hero { background: linear-gradient(135deg, #e11d48 0%, #7c3aed 100%); color: #fff; border-radius: 26px; padding: 22px 26px; margin-bottom: 18px;
+               display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .fs-hero h2 { margin: 0; font-size: 1.4rem; font-weight: 700; }
+    .fs-hero p { margin: 4px 0 0; opacity: .9; font-size: .9rem; }
+    .fs-hero a { background: #fff; color: #e11d48; border-radius: 22px; padding: 8px 18px; font-weight: 700; text-decoration: none; }
+    .fs-card { background: #fff; border-radius: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.06); padding: 14px 16px; margin-bottom: 12px;
+               display: flex; align-items: center; gap: 14px; }
+    .fs-logo { width: 54px; height: 54px; border-radius: 16px; background: #eef0ff center/cover no-repeat; flex: 0 0 auto; display: flex;
+               align-items: center; justify-content: center; font-weight: 800; color: #4f46e5; font-size: 22px; }
+    .fs-info { flex: 1; min-width: 0; }
+    .fs-name { font-weight: 700; color: #222; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fs-sub { color: #6b7280; font-size: 13px; }
+    .fs-st { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 10px; }
+    .fs-st.open { background: #dcfce7; color: #166534; } .fs-st.busy { background: #fef3c7; color: #92400e; } .fs-st.closed { background: #fee2e2; color: #991b1b; }
+    .fs-rm { border: 0; background: #fff1f2; color: #e11d48; width: 38px; height: 38px; border-radius: 50%; font-size: 17px; cursor: pointer; flex: 0 0 auto; }
+    .fs-empty { background: #fff; border-radius: 22px; padding: 44px 20px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+    .fs-empty i { font-size: 54px; color: #fda4af; }
+    .fs-empty a { display: inline-block; margin-top: 14px; background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); color: #fff;
+                  border-radius: 22px; padding: 10px 24px; font-weight: 700; text-decoration: none; }
+</style>
+
+<div class="fs-wrap">
+    <div class="fs-hero">
+        <div>
+            <h2><i class="bi bi-heart-fill"></i> Favorite Stores</h2>
+            <p>{{ favorites|length }} store{{ favorites|length|pluralize }} save hain</p>
+        </div>
+        <a href="{% url 'store_list' %}"><i class="bi bi-shop"></i> Sab stores</a>
+    </div>
+
+    {% if favorites %}
+    <div id="fsList">
+        {% for f in favorites %}
+        {% with s=f.store %}
+        <div class="fs-card" id="fs-{{ s.id }}">
+            <div class="fs-logo" {% if s.logo %}style="background-image:url('{{ s.logo.url }}')"{% endif %}>{% if not s.logo %}{{ s.business_name|slice:":1"|upper }}{% endif %}</div>
+            <div class="fs-info">
+                <a class="fs-name" href="{% url 'store_detail' s.id %}">{{ s.business_name }}</a>
+                <div class="fs-sub">{% if s.store_category %}{{ s.store_category.icon }} {{ s.store_category.name }}{% endif %}{% if s.city %} &middot; {{ s.city }}{% endif %}</div>
+                <span class="fs-st {{ s.status_label }}">{% if s.status_label == 'open' %}Open{% elif s.status_label == 'busy' %}Busy{% else %}Closed{% endif %}</span>
+            </div>
+            <button type="button" class="fs-rm" data-remove="{{ s.id }}" aria-label="Favorites se hatayein"><i class="bi bi-heart-fill"></i></button>
+        </div>
+        {% endwith %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="fs-empty">
+        <i class="bi bi-heart"></i>
+        <p class="mt-2 mb-0">Abhi koi favorite store nahi. Kisi store par dil wale button se save karein.</p>
+        <a href="{% url 'store_list' %}">Stores dekhein</a>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+(function () {
+    var list = document.getElementById('fsList');
+    if (!list) return;
+    var base = '{% url "store_favorite_toggle" 0 %}'.replace(/0\/$/, '');
+    list.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-remove]');
+        if (!b) return;
+        var id = b.dataset.remove; b.disabled = true;
+        fetch(base + id + '/', {method: 'POST', credentials: 'same-origin',
+            headers: {'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest'}})
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (d.success && !d.saved) { var c = document.getElementById('fs-' + id); if (c) c.remove(); if (!list.children.length) location.reload(); }
+            else { b.disabled = false; }
+        }).catch(function () { b.disabled = false; alert('Network error, dobara koshish karein.'); });
+    });
+})();
+</script>
+{% endblock %}

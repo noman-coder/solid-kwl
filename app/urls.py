@@ -15,6 +15,7 @@ from app.customer import views_rider_password_reset
 from app.security import views_admin_reset
 from app.customer import views_reviews
 from app.customer import views_stores
+from app.customer import views_coupons, views_extras
 from app.security import views_admin_otp
 from app.security import views_security
 from app.backoffice import views_bi  
@@ -1147,6 +1148,11 @@ urlpatterns = [
      path('shop/vendor/analytics/', views_vendor_tools.vendor_analytics, name='vendor_analytics'),
      path('shop/vendor/analytics/export/', views_vendor_tools.vendor_analytics_export, name='vendor_analytics_export'),
      path('shop/vendor/quick-update/', views_vendor_tools.vendor_quick_update, name='vendor_quick_update'),
+     path('shop/vendor/coupons/', views_coupons.vendor_coupons, name='vendor_coupons'),
+     path('shop/vendor/coupons/<int:pk>/toggle/', views_coupons.vendor_coupon_toggle, name='vendor_coupon_toggle'),
+     path('shop/vendor/coupons/<int:pk>/delete/', views_coupons.vendor_coupon_delete, name='vendor_coupon_delete'),
+     path('shop/vendor/reviews/', views_extras.vendor_reviews, name='vendor_reviews'),
+     path('shop/vendor/reviews/<int:pk>/reply/', views_extras.vendor_review_reply, name='vendor_review_reply'),
      # ---- Rider portal (Talabat jaisa rider) ----
      path('shop/rider/login/', views_rider_portal.rider_login, name='rider_login'),
      path('shop/rider/logout/', views_rider_portal.rider_logout, name='rider_logout'),
@@ -1189,6 +1195,11 @@ urlpatterns = [
      path('shop/order/<int:order_id>/reorder/', views_customer_tools.reorder_order, name='reorder_order'),
      path('shop/favorites/', views_customer_tools.wishlist_view, name='wishlist_view'),
      path('shop/favorites/toggle/<int:product_id>/', views_customer_tools.wishlist_toggle, name='wishlist_toggle'),
+     path('shop/coupons/', views_coupons.my_coupons, name='my_coupons'),
+     path('shop/coupon/apply/', views_coupons.coupon_apply, name='coupon_apply'),
+     path('shop/coupon/remove/', views_coupons.coupon_remove, name='coupon_remove'),
+     path('shop/favorite-stores/', views_extras.favorite_stores_view, name='favorite_stores_view'),
+     path('shop/favorite-stores/toggle/<int:pk>/', views_extras.store_favorite_toggle, name='store_favorite_toggle'),
      path('customers/<int:pk>/', views_frontend.customer_ledger, name='customer_detail'),
      path('shop/send-order-otp/', views_customer_auth.send_order_otp, name='send_order_otp'),
      path('shop/verify-order-otp/', views_customer_auth.verify_order_otp, name='verify_order_otp'),

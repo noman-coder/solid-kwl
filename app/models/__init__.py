@@ -50,6 +50,8 @@ _MODULES = [
     "trade.pos_shift",
     "trade.shop_banner",
     "trade.shop_wishlist",
+    "trade.coupons",
+    "trade.favorite_stores",
     "trade.shop_traffic",
     "system.translation",
     "finance.gl_posting",

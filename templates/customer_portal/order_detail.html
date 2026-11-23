@@ -205,16 +205,22 @@
                                 {% endfor %}
                             </tbody>
                             <tfoot class="table-light">
-                                {% if is_store_order %}
+                                {% if is_store_order or order.discount_value > 0 %}
                                 <tr>
                                     <td colspan="3" class="text-end">Delivery fee:</td>
-                                    <td class="text-end">Rs. {{ order.delivery_fee|floatformat:0 }}</td>
+                                    <td class="text-end">{% if order.delivery_fee > 0 %}Rs. {{ order.delivery_fee|floatformat:0 }}{% else %}<span class="text-success">FREE</span>{% endif %}</td>
+                                </tr>
+                                {% endif %}
+                                {% if order.discount_value > 0 %}
+                                <tr>
+                                    <td colspan="3" class="text-end text-success">🎟️ Coupon{% if order.coupon_code %} {{ order.coupon_code }}{% endif %}:</td>
+                                    <td class="text-end text-success">- Rs. {{ order.discount_value|floatformat:0 }}</td>
                                 </tr>
                                 {% endif %}
                                 <tr>
                                     <td colspan="3" class="text-end fw-bold">Total:</td>
                                     <td class="text-end fw-bold text-success fs-5">
-                                        Rs. {% if is_store_order %}{{ grand_total|floatformat:0 }}{% else %}{{ total_amount|floatformat:2 }}{% endif %}
+                                        Rs. {% if is_store_order or order.discount_value > 0 %}{{ grand_total|floatformat:0 }}{% else %}{{ total_amount|floatformat:2 }}{% endif %}
                                     </td>
                                 </tr>
                             </tfoot>

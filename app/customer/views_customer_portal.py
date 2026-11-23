@@ -1506,11 +1506,17 @@ def set_delivery_type(request):
             customer = request.user.customer_profile.customer
         
         data_result = calculate_cart_data(cart, customer=customer, delivery_type=delivery_type)
-        
+
+        from . import coupons as coupon_engine
+        coupon_info = coupon_engine.checkout_summary(request, customer, cart, data_result)
+
         return JsonResponse({
             'success': True,
             'delivery_charges': float(data_result['delivery_charges']),
-            'total_amount': float(data_result['total_amount']),
+            'total_amount': float(coupon_info['total']),
+            'coupon_saving': float(coupon_info['saving']),
+            'coupon_code': coupon_info['code'],
+            'coupon_error': coupon_info['error'],
             'delivery_info': {
                 'message': data_result['delivery_info']['message'],
                 'time': data_result['delivery_info']['time_estimate'],
@@ -1578,6 +1584,13 @@ def checkout(request):
         else:
             otp_masked_email = email
     
+    # ✅ Coupon (session mein ho to dobara parkh kar net total banao)
+    from . import coupons as coupon_engine
+    coupon_info = coupon_engine.checkout_summary(
+        request, profile.customer if profile else None, cart, data)
+    if coupon_info['error']:
+        messages.warning(request, f"Coupon hata diya gaya: {coupon_info['error']}")
+
     # COD + JazzCash/EasyPaisa (sirf jab company settings mein number likha ho). Bank nahi.
     payment_methods, payment_numbers = get_payment_options()
     
@@ -1589,7 +1602,8 @@ def checkout(request):
         'cart_items': data['cart_items'],
         'subtotal': data['subtotal'],
         'delivery_charges': data['delivery_charges'],
-        'total_amount': data['total_amount'],
+        'total_amount': coupon_info['total'],
+        'coupon': coupon_info,
         'delivery_info': data['delivery_info'],
         'delivery_options': data['delivery_options'],
         'free_delivery_progress': data['free_delivery_progress'],
@@ -1713,9 +1727,22 @@ def place_order(request):
             messages.error(request, store_error)
             return redirect('cart_view')
         
+        # ✅ Coupon (agar lagaya ho) - dobara parkho; naakaam ho to order rok kar wajah batao
+        from . import coupons as coupon_engine
+        coupon_res = coupon_engine.evaluate_session(
+            request, customer, cart, cart_data['subtotal'], delivery_charges)
+        if coupon_res is not None and not coupon_res.ok:
+            messages.error(request, f'Coupon: {coupon_res.message}')
+            return redirect('checkout')
+        coupon_on = bool(coupon_res and coupon_res.ok)
+        order_fields = store_orders.store_order_fields(cart, cart_data, payment_method)
+        if coupon_on and coupon_res.free_delivery:
+            order_fields['delivery_fee'] = Decimal('0.00')
+        paid_delivery = order_fields.get('delivery_fee', delivery_charges)
+
         # ✅ Create order
         order = SaleOrder.objects.create(
-            **store_orders.store_order_fields(cart, cart_data, payment_method),
+            **order_fields,
             customer=customer,
             warehouse=warehouse,
             order_date=now(),
@@ -1724,11 +1751,12 @@ def place_order(request):
                 f"🌐 WEB ORDER\n"
                 f"Payment: {payment_method}\n"
                 f"Delivery: {delivery_type}\n"
-                f"Delivery Charge: Rs. {delivery_charges}\n"
+                f"Delivery Charge: Rs. {paid_delivery}\n"
                 f"Time: {cart_data['delivery_info']['time_estimate']}"
+                + (f"\nCoupon {coupon_res.coupon.code}: -Rs. {coupon_res.total_saving}" if coupon_on else '')
             ),
-            discount_value=Decimal('0.00'),
-            advance_payment=delivery_charges,  # Delivery charges as advance
+            discount_value=coupon_res.discount if coupon_on else Decimal('0.00'),
+            advance_payment=paid_delivery,  # Delivery charges as advance
             created_by=request.user if request.user.is_authenticated else None,
         )
         
@@ -1758,8 +1786,18 @@ def place_order(request):
                 'total': float(item_total),
             })
         
-        # ✅ Final total with delivery
-        final_total = total_amount + delivery_charges
+        # ✅ Coupon ka istemal likho (limit lock ke saath); na ho paye to discount hat jata hai
+        coupon_discount = Decimal('0.00')
+        if coupon_on:
+            applied, coupon_discount, paid_delivery = coupon_engine.apply_to_new_order(
+                coupon_res, order, customer, delivery_charges)
+            if not applied:
+                order.advance_payment = paid_delivery
+                order.save(update_fields=['advance_payment'])
+        delivery_charges = paid_delivery
+
+        # ✅ Final total with delivery (coupon ke baad)
+        final_total = total_amount - coupon_discount + delivery_charges
 
         # ✅ Vendor ko naye order ki khabar
         store_orders.notify_vendor_new_order(order)
@@ -1779,6 +1817,7 @@ def place_order(request):
         request.session.pop('buy_now_product_id', None)
         request.session.pop('buy_now_item', None)
         request.session.pop('delivery_type', None)
+        request.session.pop('coupon_code', None)
         if not was_buy_now:
             request.session['cart'] = {}  # Buy Now order mein customer ki cart wese hi rehti hai
         request.session.modified = True
@@ -1844,6 +1883,8 @@ def place_order(request):
             'total_amount': final_total,
             'subtotal': total_amount,
             'delivery_charges': delivery_charges,
+            'coupon_discount': coupon_discount,
+            'coupon_code': order.coupon_code,
             'delivery_type': delivery_type,
             'delivery_info': cart_data['delivery_info'],
             'payment_method': payment_method,

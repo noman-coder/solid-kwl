@@ -1,0 +1,59 @@
+{% extends 'customer_portal/base_shop.html' %}
+{% load static %}
+
+{% block title %}Offers & Coupons - {{ company_name }}{% endblock %}
+
+{% block content %}
+<style>
+    .cp-wrap { max-width: 820px; margin: 24px auto; padding: 0 12px; }
+    .cp-hero { background: linear-gradient(135deg, #f59e0b 0%, #e11d48 100%); color: #fff; border-radius: 26px; padding: 22px 26px; margin-bottom: 18px; }
+    .cp-hero h2 { margin: 0; font-size: 1.4rem; font-weight: 700; }
+    .cp-hero p { margin: 4px 0 0; opacity: .92; font-size: .9rem; }
+    .cp-card { background: #fff; border-radius: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.06); padding: 16px 18px; margin-bottom: 12px;
+               display: flex; gap: 14px; align-items: center; justify-content: space-between; border-left: 6px solid #f59e0b; }
+    .cp-main { min-width: 0; }
+    .cp-code { font-family: monospace; font-weight: 800; font-size: 18px; letter-spacing: 1px; color: #e11d48; }
+    .cp-title { font-weight: 700; margin-top: 2px; }
+    .cp-meta { color: #6b7280; font-size: 13px; margin-top: 4px; }
+    .cp-copy { border: 0; border-radius: 14px; padding: 9px 16px; font-weight: 700; color: #fff; cursor: pointer; flex: 0 0 auto;
+               background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); }
+    .cp-copy.done { background: #16a34a; }
+    .cp-empty { background: #fff; border-radius: 22px; padding: 44px 20px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.06); color: #6b7280; }
+</style>
+
+<div class="cp-wrap">
+    <div class="cp-hero">
+        <h2>🎟️ Offers &amp; Coupons</h2>
+        <p>Code copy karein aur checkout par lagayein.</p>
+    </div>
+
+    {% for c in offers %}
+    <div class="cp-card">
+        <div class="cp-main">
+            <div class="cp-code">{{ c.code }}</div>
+            <div class="cp-title">{{ c.title|default:c.short_label }}</div>
+            <div class="cp-meta">
+                {{ c.short_label }} &middot; {{ c.store_label }}
+                {% if c.min_order > 0 %}&middot; Kam az kam Rs. {{ c.min_order|floatformat:0 }}{% endif %}
+                {% if c.first_order_only %}&middot; Pehle order par{% endif %}
+                {% if c.valid_until %}&middot; {{ c.valid_until|date:"d M Y" }} tak{% endif %}
+            </div>
+        </div>
+        <button type="button" class="cp-copy" data-code="{{ c.code }}"><i class="bi bi-clipboard"></i> Copy</button>
+    </div>
+    {% empty %}
+    <div class="cp-empty">Abhi koi coupon nahi hai. Baad mein dobara dekhein!</div>
+    {% endfor %}
+</div>
+
+<script>
+document.addEventListener('click', function (e) {
+    var b = e.target.closest('.cp-copy');
+    if (!b) return;
+    var code = b.dataset.code, old = b.innerHTML;
+    function done() { b.classList.add('done'); b.innerHTML = '<i class="bi bi-check-lg"></i> Copied'; setTimeout(function () { b.classList.remove('done'); b.innerHTML = old; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, function () { prompt('Code copy karein:', code); }); }
+    else { prompt('Code copy karein:', code); }
+});
+</script>
+{% endblock %}

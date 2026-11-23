@@ -132,3 +132,51 @@ class ShopWishlistAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+
+@admin.register(Coupon, site=admin.site)
+class CouponAdmin(admin.ModelAdmin):
+    list_display = ('code', 'title', 'vendor', 'short_label', 'min_order', 'status', 'used', 'is_active', 'valid_until')
+    list_filter = ('is_active', 'discount_type', 'first_order_only', 'vendor')
+    search_fields = ('code', 'title', 'vendor__name')
+    list_editable = ('is_active',)
+    autocomplete_fields = ()
+    readonly_fields = ('created_by', 'created_at')
+    actions = ['pause_coupons', 'resume_coupons']
+
+    @admin.display(description='Used')
+    def used(self, obj):
+        return obj.used_count
+
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+    @admin.action(description='Selected coupons band karein')
+    def pause_coupons(self, request, queryset):
+        messages.success(request, f'{queryset.update(is_active=False)} coupon(s) band kiye')
+
+    @admin.action(description='Selected coupons chalu karein')
+    def resume_coupons(self, request, queryset):
+        messages.success(request, f'{queryset.update(is_active=True)} coupon(s) chalu kiye')
+
+
+@admin.register(CouponRedemption, site=admin.site)
+class CouponRedemptionAdmin(admin.ModelAdmin):
+    list_display = ('coupon', 'customer', 'sale_order', 'discount_amount', 'delivery_waived', 'funded_by', 'created_at')
+    list_filter = ('funded_by', 'coupon')
+    search_fields = ('coupon__code', 'customer__name', 'sale_order__order_no')
+    readonly_fields = ('coupon', 'customer', 'sale_order', 'discount_amount', 'delivery_waived', 'funded_by', 'created_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(FavoriteStore, site=admin.site)
+class FavoriteStoreAdmin(admin.ModelAdmin):
+    list_display = ('customer', 'store', 'created_at')
+    search_fields = ('customer__name', 'store__business_name')

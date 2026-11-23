@@ -117,5 +117,6 @@ def store_reviews(vendor, limit=10):
     latest = []
     for rv in qs.select_related('sale_order__customer')[:limit]:
         latest.append({'stars': rv.vendor_rating, 'comment': rv.vendor_comment,
-                       'name': _reviewer_name(rv.sale_order), 'date': rv.created_at})
+                       'name': _reviewer_name(rv.sale_order), 'date': rv.created_at,
+                       'reply': rv.vendor_reply})
     return {'summary': summary, 'bars': bars, 'latest': latest}

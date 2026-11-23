@@ -977,6 +977,26 @@
                         </strong>
                     </div>
                     
+                    {% if coupon.ok %}
+                    <div class="summary-item" id="couponRow" style="color:#16a34a;">
+                        <span>🎟️ Coupon <b>{{ coupon.code }}</b>
+                            <a href="#" id="couponRemoveBtn" class="small ms-1" style="color:#dc3545;">hatayein</a>
+                            {% if coupon.free_delivery %}<small class="d-block" style="font-size:.7rem;">Free delivery</small>{% endif %}
+                        </span>
+                        <strong>- Rs. <span id="summaryCoupon">{{ coupon.saving|floatformat:0 }}</span></strong>
+                    </div>
+                    {% else %}
+                    <div class="mb-2" id="couponBox" style="padding-top:6px;">
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="couponInput" class="form-control" placeholder="Coupon code" maxlength="30"
+                                   autocomplete="off" style="text-transform:uppercase;">
+                            <button type="button" class="btn btn-outline-primary" id="couponApplyBtn">Apply</button>
+                        </div>
+                        <small id="couponMsg" class="d-block mt-1"></small>
+                        <a href="{% url 'my_coupons' %}" class="small">🎟️ Available offers dekhein</a>
+                    </div>
+                    {% endif %}
+
                     <div class="summary-item total-row">
                         <strong>Total</strong>
                         <strong class="text-success">
@@ -1229,6 +1249,10 @@ function selectDelivery(type) {
                 placeAmountEl2.textContent = Math.round(data.total_amount).toLocaleString();
             }
             
+            const couponEl = document.getElementById('summaryCoupon');
+            if (couponEl) { couponEl.textContent = Math.round(data.coupon_saving || 0).toLocaleString(); }
+            if (data.coupon_error) { location.reload(); }
+
             console.log(`✅ Delivery: ${type} | Charges: Rs. ${data.delivery_charges}`);
         }
     })
@@ -1734,5 +1758,38 @@ window.sendOTP = sendOTP;
 window.resendOTP = resendOTP;
 window.verifyOTP = verifyOTP;
 window.saveAddress = saveAddress;
+</script>
+
+<script>
+(function () {
+    var applyUrl = '{% url "coupon_apply" %}', removeUrl = '{% url "coupon_remove" %}';
+    function post(url, payload) {
+        return fetch(url, {method: 'POST', credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest'},
+            body: JSON.stringify(payload || {})}).then(function (r) { return r.json(); });
+    }
+    var applyBtn = document.getElementById('couponApplyBtn');
+    if (applyBtn) {
+        var input = document.getElementById('couponInput'), msg = document.getElementById('couponMsg');
+        var go = function () {
+            var code = (input.value || '').trim();
+            if (!code) { msg.textContent = 'Coupon code likhein'; msg.className = 'd-block mt-1 text-danger'; return; }
+            applyBtn.disabled = true;
+            post(applyUrl, {code: code}).then(function (d) {
+                if (d.success) { msg.textContent = d.message; msg.className = 'd-block mt-1 text-success'; location.reload(); }
+                else { msg.textContent = d.message || 'Coupon nahi laga'; msg.className = 'd-block mt-1 text-danger'; applyBtn.disabled = false; }
+            }).catch(function () { msg.textContent = 'Network error, dobara koshish karein.'; msg.className = 'd-block mt-1 text-danger'; applyBtn.disabled = false; });
+        };
+        applyBtn.addEventListener('click', go);
+        input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+    }
+    var rm = document.getElementById('couponRemoveBtn');
+    if (rm) {
+        rm.addEventListener('click', function (e) {
+            e.preventDefault();
+            post(removeUrl).then(function () { location.reload(); });
+        });
+    }
+})();
 </script>
 {% endblock %}
