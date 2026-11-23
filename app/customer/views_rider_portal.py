@@ -407,30 +407,36 @@ def _fnum(v):
     return f if f == f and f not in (float('inf'), float('-inf')) else None
 
 
-@rider_login_required
-@require_POST
-def rider_update_location(request):
-    """Rider ka browser har ~10s yahan GPS bhejta hai. Sirf active delivery par save hota hai."""
-    rider = request.user.rider_profile
-    lat, lng = _fnum(request.POST.get('lat')), _fnum(request.POST.get('lng'))
+def save_rider_location(rider, post):
+    """Web aur Android app dono yahan se location save karte hain. post = dict-jaisa (lat,lng,acc,spd,hdg).
+    Return: (http_status, json_dict)"""
+    lat, lng = _fnum(post.get('lat')), _fnum(post.get('lng'))
     if lat is None or lng is None or not (-90 <= lat <= 90 and -180 <= lng <= 180):
-        return JsonResponse({'ok': False}, status=400)
+        return 400, {'ok': False}
     di = (DeliveryInfo.objects.filter(rider=rider, status__in=TRACK_STATUSES)
           .order_by('-picked_up_at').first())
     if not di:                                    # active delivery nahi -> kuch save nahi
-        return JsonResponse({'ok': True, 'tracking': False})
-    acc = _fnum(request.POST.get('acc'))
+        return 200, {'ok': True, 'tracking': False}
+    acc = _fnum(post.get('acc'))
     if acc is not None and acc > 500:             # bohot kharab GPS: ignore
-        return JsonResponse({'ok': True, 'tracking': True, 'skipped': 'low_accuracy'})
+        return 200, {'ok': True, 'tracking': True, 'skipped': 'low_accuracy'}
     RiderLiveLocation.objects.update_or_create(rider=rider, defaults={
         'latitude': lat, 'longitude': lng, 'accuracy_m': acc,
-        'speed_mps': _fnum(request.POST.get('spd')), 'heading': _fnum(request.POST.get('hdg'))})
+        'speed_mps': _fnum(post.get('spd')), 'heading': _fnum(post.get('hdg'))})
     key = f'rloglast:{rider.pk}'
     if not cache.get(key):                        # history har 30 second mein 1 baar
         RiderLocationLog.objects.create(delivery=di, latitude=lat, longitude=lng, accuracy_m=acc)
         cache.set(key, 1, 30)
     _touch(rider)
-    return JsonResponse({'ok': True, 'tracking': True})
+    return 200, {'ok': True, 'tracking': True}
+
+
+@rider_login_required
+@require_POST
+def rider_update_location(request):
+    """Rider ka browser har ~10s yahan GPS bhejta hai. Sirf active delivery par save hota hai."""
+    code, data = save_rider_location(request.user.rider_profile, request.POST)
+    return JsonResponse(data, status=code)
 
 
 # ============================================

@@ -26,6 +26,7 @@ from django.urls import path
 from . import views
 from .customer import views_delivery
 from .customer import views_order_tracking
+from .customer import views_rider_api
 from app.views_frontend.system.settings_center import settings_center
 from app.views_frontend.pos_sales import pos as pos_views
 from app.views_frontend.pos_sales import shift as shift_views
@@ -1162,6 +1163,15 @@ urlpatterns = [
      path('shop/rider/online/', views_rider_portal.rider_toggle_online, name='rider_toggle_online'),
      path('shop/rider/api/poll/', views_rider_portal.rider_poll, name='rider_poll'),
      path('shop/rider/api/location/', views_rider_portal.rider_update_location, name='rider_update_location'),
+     # ---- Rider Android app (token API) ----
+     path('api/rider/login/', views_rider_api.api_login, name='rider_api_login'),
+     path('api/rider/logout/', views_rider_api.api_logout, name='rider_api_logout'),
+     path('api/rider/me/', views_rider_api.api_me, name='rider_api_me'),
+     path('api/rider/online/', views_rider_api.api_online, name='rider_api_online'),
+     path('api/rider/orders/', views_rider_api.api_orders, name='rider_api_orders'),
+     path('api/rider/orders/<int:pk>/accept/', views_rider_api.api_accept, name='rider_api_accept'),
+     path('api/rider/orders/<int:pk>/<str:action>/', views_rider_api.api_order_action, name='rider_api_action'),
+     path('api/rider/location/', views_rider_api.api_location, name='rider_api_location'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),
