@@ -1,0 +1,120 @@
+{% extends 'customer_portal/base_shop.html' %}
+{% block bottom_nav %}{% endblock %}
+{% load static %}
+
+{% block title %}Sales Analytics - {{ company_name }}{% endblock %}
+
+{% block content %}
+<style>
+    body { background: #f3f5ff; }
+    .va-wrap { max-width: 1000px; margin: 24px auto; padding: 0 12px; }
+    .va-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .va-top h3 { margin: 0; font-weight: 700; }
+    .va-btn { text-decoration: none; border: 1px solid #ddd; background: #fff; border-radius: 22px; padding: 7px 16px; color: #333; font-weight: 600; display: inline-block; }
+    .va-btn.pri { background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); color: #fff; border: 0; }
+    .va-tabs { display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; }
+    .va-tab { flex: 1 0 auto; text-align: center; text-decoration: none; padding: 10px 14px; border-radius: 14px;
+              background: #fff; color: #444; font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,.05); white-space: nowrap; }
+    .va-tab.active { background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); color: #fff; }
+    .va-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .va-kpi { background: #fff; border-radius: 20px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,.06); text-align: center; }
+    .va-kpi b { display: block; font-size: 22px; overflow-wrap: anywhere; }
+    .va-kpi small { color: #777; }
+    .va-card { background: #fff; border-radius: 20px; padding: 18px; box-shadow: 0 6px 20px rgba(0,0,0,.06); margin-bottom: 16px; }
+    .va-card h5 { margin: 0 0 12px; font-weight: 700; }
+    .va-chart { display: flex; align-items: flex-end; gap: 3px; height: 150px; overflow-x: auto; padding-top: 6px; }
+    .va-col { flex: 1 0 14px; min-width: 14px; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+    .va-bar { background: linear-gradient(180deg, #7c3aed, #2563eb); border-radius: 6px 6px 0 0; min-height: 2px; }
+    .va-col.zero .va-bar { background: #e5e7eb; }
+    .va-axis { display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-top: 6px; }
+    .va-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+    .va-row:last-child { border-bottom: 0; }
+    .va-name { flex: 0 0 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .va-track { flex: 1; background: #eef0ff; border-radius: 10px; height: 10px; overflow: hidden; }
+    .va-fill { background: linear-gradient(90deg, #2563eb, #7c3aed); height: 100%; border-radius: 10px; }
+    .va-amt { flex: 0 0 auto; font-weight: 700; text-align: right; min-width: 80px; }
+    .va-low { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+    .va-low:last-child { border-bottom: 0; }
+    .va-zero { color: #dc3545; font-weight: 700; }
+    .va-warn { color: #e0a800; font-weight: 700; }
+    .va-empty { color: #888; padding: 18px 0; text-align: center; }
+    .va-note { font-size: 12px; color: #888; margin-top: 8px; }
+    @media (max-width: 600px) {
+        .va-name { flex-basis: 34%; }
+        .va-amt { min-width: 70px; font-size: 13px; }
+    }
+</style>
+
+<div class="va-wrap">
+    <div class="va-top">
+        <h3><i class="bi bi-graph-up-arrow"></i> Sales Analytics</h3>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <a href="{% url 'vendor_analytics_export' %}?range={{ range_key }}" class="va-btn"><i class="bi bi-download"></i> CSV</a>
+            <a href="{% url 'vendor_quick_update' %}" class="va-btn pri"><i class="bi bi-lightning-charge"></i> Quick Update</a>
+            <a href="{% url 'vendor_dashboard' %}" class="va-btn">&larr; Dashboard</a>
+        </div>
+    </div>
+
+    <div class="va-tabs">
+        {% for key, label in ranges %}
+            <a href="?range={{ key }}" class="va-tab {% if key == range_key %}active{% endif %}">{{ label }}</a>
+        {% endfor %}
+    </div>
+
+    <div class="va-grid">
+        <div class="va-kpi"><b>Rs. {{ data.sales|floatformat:0 }}</b><small>Bikri ({{ range_label }})</small></div>
+        <div class="va-kpi"><b>{{ data.total_orders }}</b><small>Total Orders</small></div>
+        <div class="va-kpi"><b style="color:#28a745;">{{ data.done }}</b><small>Deliver ho chuke</small></div>
+        <div class="va-kpi"><b style="color:#e0a800;">{{ data.open_orders }}</b><small>Chal rahe</small></div>
+        <div class="va-kpi"><b>Rs. {{ data.avg_order|floatformat:0 }}</b><small>Average Order</small></div>
+        <div class="va-kpi"><b style="color:#28a745;">Rs. {{ data.est_share|floatformat:0 }}</b><small>Aap ka hissa (andaza, {{ data.commission|floatformat:"-2" }}% commission ke baad)</small></div>
+        <div class="va-kpi"><b>{{ data.units|floatformat:"-2" }}</b><small>Units</small></div>
+        <div class="va-kpi"><b style="color:#dc3545;">{{ data.cancelled }}</b><small>Cancelled ({{ data.cancel_rate }}%)</small></div>
+    </div>
+
+    <div class="va-card">
+        <h5>📈 Din ba din bikri</h5>
+        <div class="va-chart">
+            {% for d in data.days %}
+                <div class="va-col {% if not d.total %}zero{% endif %}" title="{{ d.date|date:'d M' }}: Rs. {{ d.total|floatformat:0 }} ({{ d.orders }} orders)">
+                    <div class="va-bar" style="height: {% if d.pct %}{{ d.pct }}{% else %}2{% endif %}%;"></div>
+                </div>
+            {% endfor %}
+        </div>
+        <div class="va-axis"><span>{{ start_date|date:"d M" }}</span><span>{{ today|date:"d M" }}</span></div>
+        {% if not data.sales %}<div class="va-note">Is muddat mein abhi koi bikri nahi.</div>{% endif %}
+    </div>
+
+    <div class="va-card">
+        <h5>🏆 Sab se zyada bikne wale products</h5>
+        {% for t in data.top %}
+            <div class="va-row">
+                <div class="va-name">{{ forloop.counter }}. {{ t.product__name }}</div>
+                <div class="va-track"><div class="va-fill" style="width: {{ t.pct }}%;"></div></div>
+                <div class="va-amt">Rs. {{ t.total|floatformat:0 }}<br><small style="color:#888; font-weight:400;">{{ t.qty|floatformat:"-2" }} units</small></div>
+            </div>
+        {% empty %}
+            <div class="va-empty">Abhi koi product nahi bika.</div>
+        {% endfor %}
+    </div>
+
+    <div class="va-card">
+        <h5>⚠️ Kam stock wale products{% if low_stock_count %} ({{ low_stock_count }}){% endif %}</h5>
+        {% for r in low_stock %}
+            <div class="va-low">
+                <span>{{ r.product.name }}</span>
+                <span class="{% if r.stock <= 0 %}va-zero{% else %}va-warn{% endif %}">
+                    {% if r.stock <= 0 %}Khatam{% else %}{{ r.stock|floatformat:"-2" }} bacha{% endif %}
+                </span>
+            </div>
+        {% empty %}
+            <div class="va-empty">✅ Sab products ka stock theek hai.</div>
+        {% endfor %}
+        {% if low_stock_count %}
+            <a href="{% url 'vendor_quick_update' %}?low=1" class="va-btn pri" style="margin-top:12px;">Stock barhayein &rarr;</a>
+        {% endif %}
+    </div>
+
+    <div class="va-note">Hisaab cancelled orders ke baghair hai. "Aap ka hissa" andaza hai; asal payable dashboard par dikhta hai.</div>
+</div>
+{% endblock %}

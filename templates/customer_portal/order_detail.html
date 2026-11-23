@@ -262,6 +262,19 @@
             </div>
             {% endif %}
 
+            <!-- Reorder -->
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-body">
+                    <form method="post" action="{% url 'reorder_order' order.id %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-arrow-repeat"></i> Dobara order karein
+                        </button>
+                    </form>
+                    <small class="text-muted d-block mt-2">Yehi products aaj ki price aur stock ke hisaab se cart mein aa jayenge.</small>
+                </div>
+            </div>
+
             <!-- Cancel Button -->
             {% if order.status == 'pending' or order.status == 'confirmed' and not order.vendor_id %}
             <div class="card border-0 shadow-sm">

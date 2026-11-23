@@ -120,3 +120,15 @@ class ShopBannerAdmin(admin.ModelAdmin):
         if not obj.image:
             return '-'
         return format_html('<img src="{}" style="height:48px;border-radius:6px;">', obj.image.url)
+
+
+@admin.register(ShopWishlist, site=admin.site)
+class ShopWishlistAdmin(admin.ModelAdmin):
+    """Customers ke Favorites (sirf dekhne ke liye): kaun sa product kitne logon ne save kiya."""
+    list_display = ('product', 'customer', 'created_at')
+    search_fields = ('product__name', 'customer__name')
+    date_hierarchy = 'created_at'
+    readonly_fields = ('customer', 'product', 'created_at')
+
+    def has_add_permission(self, request):
+        return False

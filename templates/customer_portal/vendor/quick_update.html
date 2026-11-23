@@ -1,0 +1,137 @@
+{% extends 'customer_portal/base_shop.html' %}
+{% block bottom_nav %}{% endblock %}
+{% load static %}
+
+{% block title %}Quick Update - {{ company_name }}{% endblock %}
+
+{% block content %}
+<style>
+    body { background: #f3f5ff; }
+    .vq-wrap { max-width: 1000px; margin: 24px auto 90px; padding: 0 12px; }
+    .vq-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .vq-top h3 { margin: 0; font-weight: 700; }
+    .vq-btn { text-decoration: none; border: 1px solid #ddd; background: #fff; border-radius: 22px; padding: 7px 16px; color: #333; font-weight: 600; display: inline-block; cursor: pointer; }
+    .vq-btn.pri { background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); color: #fff; border: 0; }
+    .vq-filter { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+    .vq-filter input[type=text] { flex: 1 1 200px; border: 1px solid #ddd; border-radius: 22px; padding: 8px 16px; }
+    .vq-help { background: #d1ecf1; color: #0c5460; border-radius: 14px; padding: 10px 14px; font-size: 13px; margin-bottom: 12px; }
+    .vq-card { background: #fff; border-radius: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.06); overflow: hidden; }
+    .vq-row { display: grid; grid-template-columns: 52px 1fr 110px 90px 90px 110px; gap: 10px; align-items: center;
+              padding: 12px 14px; border-bottom: 1px solid #f0f0f0; }
+    .vq-row.head { background: #fafafa; font-size: 12px; color: #666; font-weight: 700; }
+    .vq-row.changed { background: #f5f3ff; }
+    .vq-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; background: #f3f3f3; }
+    .vq-name { font-weight: 600; line-height: 1.3; }
+    .vq-name small { display: block; font-weight: 400; color: #888; }
+    .vq-row input[type=number] { width: 100%; border: 1px solid #ddd; border-radius: 10px; padding: 7px 8px; box-sizing: border-box; }
+    .vq-stock { font-weight: 700; }
+    .vq-stock.zero { color: #dc3545; }
+    .vq-stock.low { color: #e0a800; }
+    .vq-lbl { display: none; }
+    .vq-bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; box-shadow: 0 -4px 20px rgba(0,0,0,.1);
+              padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; z-index: 50; }
+    .vq-empty { padding: 30px; text-align: center; color: #888; }
+    @media (max-width: 720px) {
+        .vq-row.head { display: none; }
+        .vq-row { grid-template-columns: 52px 1fr; row-gap: 8px; }
+        .vq-cell { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .vq-cell input { max-width: 150px; }
+        .vq-lbl { display: inline; color: #777; font-size: 13px; font-weight: 600; }
+    }
+</style>
+
+<div class="vq-wrap">
+    <div class="vq-top">
+        <h3><i class="bi bi-lightning-charge"></i> Quick Update</h3>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <a href="{% url 'vendor_analytics' %}" class="vq-btn"><i class="bi bi-graph-up-arrow"></i> Analytics</a>
+            <a href="{% url 'vendor_dashboard' %}" class="vq-btn">&larr; Dashboard</a>
+        </div>
+    </div>
+
+
+    <form method="get" class="vq-filter">
+        <input type="text" name="q" value="{{ q }}" placeholder="Product ka naam talash karein...">
+        <label style="display:flex; gap:6px; align-items:center; margin:0;">
+            <input type="checkbox" name="low" value="1" {% if only_low %}checked{% endif %} onchange="this.form.submit()"> Sirf kam stock
+        </label>
+        <button type="submit" class="vq-btn">Search</button>
+    </form>
+
+    <div class="vq-help">
+        Price aur discount badal kar neeche <b>Save</b> dabayein. <b>Naya stock</b> mein jo likhenge wo maujooda stock mein <b>jama</b> hoga.
+        Price/stock badalne par dobara admin review nahi hota. Shop commission: {{ commission|floatformat:"-2" }}%.
+    </div>
+
+    <form method="post" id="quickForm">
+        {% csrf_token %}
+        <div class="vq-card">
+            <div class="vq-row head">
+                <div></div><div>Product</div><div>Price (Rs.)</div><div>Discount %</div><div>Stock</div><div>Naya stock (+)</div>
+            </div>
+            {% for r in rows %}
+                {% with p=r.product %}
+                <div class="vq-row" data-orig-price="{{ p.original_price|floatformat:2 }}" data-orig-disc="{{ p.discount_percentage|floatformat:2 }}">
+                    <input type="hidden" name="ids" value="{{ p.id }}">
+                    {% if p.image %}<img src="{{ p.image.url }}" class="vq-thumb" alt="" loading="lazy">{% else %}<div class="vq-thumb"></div>{% endif %}
+                    <div class="vq-name">{{ p.name }}
+                        <small>{% if p.approval_status != 'approved' %}{{ p.get_approval_status_display }}{% elif not p.is_active %}Hidden{% else %}Live{% endif %}{% if p.unit %} &middot; {{ p.unit }}{% endif %}</small>
+                    </div>
+                    <div class="vq-cell"><span class="vq-lbl">Price (Rs.)</span>
+                        <input type="number" step="0.01" min="0.01" name="price_{{ p.id }}" value="{{ p.original_price|floatformat:2 }}" inputmode="decimal" required></div>
+                    <div class="vq-cell"><span class="vq-lbl">Discount %</span>
+                        <input type="number" step="0.01" min="0" max="90" name="discount_{{ p.id }}" value="{{ p.discount_percentage|floatformat:2 }}" inputmode="decimal"></div>
+                    <div class="vq-cell"><span class="vq-lbl">Stock</span>
+                        <span class="vq-stock {% if r.stock <= 0 %}zero{% elif r.low %}low{% endif %}">{{ r.stock|floatformat:"-2" }}</span></div>
+                    <div class="vq-cell"><span class="vq-lbl">Naya stock (+)</span>
+                        <input type="number" step="1" min="0" name="add_{{ p.id }}" placeholder="0" inputmode="numeric"></div>
+                </div>
+                {% endwith %}
+            {% empty %}
+                <div class="vq-empty">Koi product nahi mila.</div>
+            {% endfor %}
+        </div>
+
+        {% if rows %}
+        <div class="vq-bar">
+            <span id="changedCount" style="font-weight:600; color:#555;">Koi tabdeeli nahi</span>
+            <button type="submit" class="vq-btn pri" id="saveBtn" disabled>💾 Save</button>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+<script>
+(function () {
+    var form = document.getElementById('quickForm');
+    if (!form) return;
+    var saveBtn = document.getElementById('saveBtn');
+    var counter = document.getElementById('changedCount');
+    var rows = form.querySelectorAll('.vq-row[data-orig-price]');
+
+    function num(v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+
+    function refresh() {
+        var changed = 0;
+        rows.forEach(function (row) {
+            var price = row.querySelector('input[name^="price_"]');
+            var disc = row.querySelector('input[name^="discount_"]');
+            var add = row.querySelector('input[name^="add_"]');
+            var dirty = num(price.value) !== num(row.dataset.origPrice)
+                     || num(disc.value) !== num(row.dataset.origDisc)
+                     || num(add.value) > 0;
+            row.classList.toggle('changed', dirty);
+            if (dirty) changed++;
+        });
+        if (counter) counter.textContent = changed ? (changed + ' product mein tabdeeli') : 'Koi tabdeeli nahi';
+        if (saveBtn) saveBtn.disabled = !changed;
+    }
+
+    form.addEventListener('input', refresh);
+    form.addEventListener('submit', function () {
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+    });
+    refresh();
+})();
+</script>
+{% endblock %}

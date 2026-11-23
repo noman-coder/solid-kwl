@@ -7,6 +7,7 @@ from . import shop_traffic_views
 from app.customer import views_customer_auth
 from app.customer import views_account_deletion
 from app.customer import views_vendor_portal
+from app.customer import views_vendor_tools, views_customer_tools
 from app.customer import views_location
 from app.customer import views_rider_portal
 from app.customer import views_password_reset
@@ -1143,6 +1144,9 @@ urlpatterns = [
      path('shop/vendor/orders/<int:pk>/assign-rider/', views_rider_portal.vendor_assign_rider, name='vendor_assign_rider'),
      path('shop/vendor/orders/<int:pk>/<str:action>/', views_vendor_portal.vendor_order_action, name='vendor_order_action'),
      path('shop/vendor/api/orders-poll/', views_vendor_portal.vendor_orders_poll, name='vendor_orders_poll'),
+     path('shop/vendor/analytics/', views_vendor_tools.vendor_analytics, name='vendor_analytics'),
+     path('shop/vendor/analytics/export/', views_vendor_tools.vendor_analytics_export, name='vendor_analytics_export'),
+     path('shop/vendor/quick-update/', views_vendor_tools.vendor_quick_update, name='vendor_quick_update'),
      # ---- Rider portal (Talabat jaisa rider) ----
      path('shop/rider/login/', views_rider_portal.rider_login, name='rider_login'),
      path('shop/rider/logout/', views_rider_portal.rider_logout, name='rider_logout'),
@@ -1182,6 +1186,9 @@ urlpatterns = [
      path('shop/order/<int:order_id>/', views_customer_portal.order_detail_customer, name='order_detail_customer'),
      path('shop/order/<int:order_id>/cancel/', views_customer_portal.cancel_order_customer, name='cancel_order_customer'),
      path('shop/order/<int:order_id>/rate/', views_reviews.rate_order, name='rate_order'),
+     path('shop/order/<int:order_id>/reorder/', views_customer_tools.reorder_order, name='reorder_order'),
+     path('shop/favorites/', views_customer_tools.wishlist_view, name='wishlist_view'),
+     path('shop/favorites/toggle/<int:product_id>/', views_customer_tools.wishlist_toggle, name='wishlist_toggle'),
      path('customers/<int:pk>/', views_frontend.customer_ledger, name='customer_detail'),
      path('shop/send-order-otp/', views_customer_auth.send_order_otp, name='send_order_otp'),
      path('shop/verify-order-otp/', views_customer_auth.verify_order_otp, name='verify_order_otp'),

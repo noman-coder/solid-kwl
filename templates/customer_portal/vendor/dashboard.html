@@ -86,6 +86,10 @@
         </div>
         <div class="vd-head-btns">
             <a href="{% url 'vendor_orders' %}" class="vd-btn"><i class="bi bi-bag-check"></i> Orders{% if new_orders %} <span class="vd-badge" style="background:#dc3545;color:#fff;">{{ new_orders }}</span>{% endif %}</a>
+            <a href="{% url 'vendor_analytics' %}" class="vd-btn"><i class="bi bi-graph-up-arrow"></i> Analytics</a>
+            {% if profile.is_approved %}
+                <a href="{% url 'vendor_quick_update' %}" class="vd-btn"><i class="bi bi-lightning-charge"></i> Quick Update</a>
+            {% endif %}
             <a href="{% url 'vendor_store_settings' %}" class="vd-btn"><i class="bi bi-gear"></i> Store</a>
             {% if profile.is_approved %}
                 <a href="{% url 'vendor_location_verify' %}" class="vd-btn"><i class="bi bi-geo-alt"></i> {% if profile.location_verified %}Update Location{% else %}Verify Location{% endif %}</a>

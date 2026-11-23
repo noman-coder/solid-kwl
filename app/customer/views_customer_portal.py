@@ -1008,6 +1008,15 @@ def _price_products(items):
     return items
 
 
+def _in_wishlist(request, product_id):
+    """Favorites mein hai? (login na ho ya koi dikkat ho to False; page kabhi nahi tootta)"""
+    try:
+        from .views_customer_tools import wishlist_ids
+        return product_id in wishlist_ids(request)
+    except Exception:
+        return False
+
+
 def product_detail(request, pk):
     """Product detail page"""
     product = get_object_or_404(
@@ -1133,6 +1142,7 @@ def product_detail(request, pk):
         'recently_viewed': recently_viewed,
         'cart_count': get_cart_count_value(request),
         'delivery_settings': delivery_settings,
+        'in_wishlist': _in_wishlist(request, product.id),
     }
     return render(request, 'customer_portal/product_detail.html', context)
 
