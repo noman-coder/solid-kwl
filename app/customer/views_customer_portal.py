@@ -2085,8 +2085,35 @@ def order_detail_customer(request, order_id):
         'can_review': order.status == 'delivered' and review is None and (is_store_order or rider_di is not None),
         'review_rider': rider_di.rider if (rider_di and rider_di.status == 'delivered') else None,
         'rider_di': rider_di,
+        'show_live': bool(rider_di and rider_di.status in ('picked_up', 'in_transit')),
     }
     return render(request, 'customer_portal/order_detail.html', context)
+
+
+@customer_login_required
+def order_live_location(request, order_id):
+    """Customer ke order ka rider-live-location (JSON). Sirf apna order, sirf delivery ke dauran."""
+    if not hasattr(request.user, 'customer_profile'):
+        return JsonResponse({'active': False}, status=403)
+    cp = request.user.customer_profile
+    order = get_object_or_404(SaleOrder, id=order_id, customer=cp.customer)
+    from ..models import DeliveryInfo, VendorProfile
+    di = (DeliveryInfo.objects.filter(sale_order=order, rider__isnull=False,
+          status__in=['picked_up', 'in_transit']).select_related('rider').first())
+    if not di:
+        return JsonResponse({'active': False})          # delivered/cancelled -> tracking band
+    loc = getattr(di.rider, 'live_location', None)
+    vp = VendorProfile.objects.filter(vendor_id=order.vendor_id).first() if order.vendor_id else None
+    data = {'active': True, 'rider': di.rider.name, 'phone': di.rider.phone,
+            'store': [vp.latitude, vp.longitude] if vp and vp.latitude is not None and vp.longitude is not None else None,
+            'dest': [cp.latitude, cp.longitude] if cp.latitude is not None and cp.longitude is not None else None,
+            'pos': None}
+    if loc:
+        age = max(0, int((now() - loc.updated_at).total_seconds()))
+        data['pos'] = [loc.latitude, loc.longitude]
+        data['age_sec'] = age
+        data['stale'] = age > 120                       # 2 min se purani = "location ruk gayi"
+    return JsonResponse(data)
 
 
 # ============================================

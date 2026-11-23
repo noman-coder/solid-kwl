@@ -47,6 +47,7 @@ _MODULES = [
     "ai_bi.cso_tech",
     "trade.customer_portal",
     "trade.delivery",
+    "trade.rider_location",
     "trade.pos_shift",
     "trade.shop_banner",
     "trade.shop_wishlist",

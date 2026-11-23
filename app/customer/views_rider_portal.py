@@ -29,6 +29,7 @@ from django.views.decorators.http import require_POST
 from ..decorators import vendor_login_required
 from ..models import (
     CompanyInfo, DeliveryInfo, OrderTracking, RiderProfile, RiderSettlement, SaleOrder, VendorProfile,
+    RiderLiveLocation, RiderLocationLog,
 )
 from . import store_orders
 from .views_reviews import rider_rating
@@ -389,6 +390,47 @@ def rider_order_action(request, pk, action):
     except store_orders.OrderActionError as exc:
         messages.error(request, f'❌ {exc}')
     return redirect('rider_home')
+
+
+# ============================================
+# LIVE LOCATION (rider ke phone ka GPS -> customer ka map)
+# ============================================
+
+TRACK_STATUSES = ['picked_up', 'in_transit']      # 'assigned' bhi chahiye to yahan add karein
+
+
+def _fnum(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and f not in (float('inf'), float('-inf')) else None
+
+
+@rider_login_required
+@require_POST
+def rider_update_location(request):
+    """Rider ka browser har ~10s yahan GPS bhejta hai. Sirf active delivery par save hota hai."""
+    rider = request.user.rider_profile
+    lat, lng = _fnum(request.POST.get('lat')), _fnum(request.POST.get('lng'))
+    if lat is None or lng is None or not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return JsonResponse({'ok': False}, status=400)
+    di = (DeliveryInfo.objects.filter(rider=rider, status__in=TRACK_STATUSES)
+          .order_by('-picked_up_at').first())
+    if not di:                                    # active delivery nahi -> kuch save nahi
+        return JsonResponse({'ok': True, 'tracking': False})
+    acc = _fnum(request.POST.get('acc'))
+    if acc is not None and acc > 500:             # bohot kharab GPS: ignore
+        return JsonResponse({'ok': True, 'tracking': True, 'skipped': 'low_accuracy'})
+    RiderLiveLocation.objects.update_or_create(rider=rider, defaults={
+        'latitude': lat, 'longitude': lng, 'accuracy_m': acc,
+        'speed_mps': _fnum(request.POST.get('spd')), 'heading': _fnum(request.POST.get('hdg'))})
+    key = f'rloglast:{rider.pk}'
+    if not cache.get(key):                        # history har 30 second mein 1 baar
+        RiderLocationLog.objects.create(delivery=di, latitude=lat, longitude=lng, accuracy_m=acc)
+        cache.set(key, 1, 30)
+    _touch(rider)
+    return JsonResponse({'ok': True, 'tracking': True})
 
 
 # ============================================
