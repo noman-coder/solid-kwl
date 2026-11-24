@@ -1,18 +1,20 @@
-name: Build Rider APK
+name: Build Rider APK (88 Riders)
 
-# GitHub > Actions > "Build Rider APK" > Run workflow
-# Signing key khud ban jati hai (pehli dafa), cache mein rehti hai, aur backup artifact mein milti hai.
+# Manual chalayein: GitHub > Actions > "Build Rider APK (88 Riders)" > Run workflow
+# Server fixed hai: https://khanewalconnect.store (app mein kahin dikhta nahi).
 on:
   workflow_dispatch:
-    inputs:
-      api_base:
-        description: 'Aap ki website ka address (https://...)'
-        required: true
-        default: 'https://YOUR-DOMAIN.com'
   push:
     paths:
       - 'rider_app/**'
       - '.github/workflows/build_rider_apk.yml'
+
+env:
+  APP_NAME: '88 Riders'
+  # Android package name (applicationId). Digit se shuru hone wala hissa Android mein allowed nahi,
+  # is liye 88riders ki jagah riders88.
+  APP_ID: 'com.khanewal.riders88.app'
+  API_BASE: 'https://khanewalconnect.store'
 
 jobs:
   apk:
@@ -34,7 +36,10 @@ jobs:
           cache: true
 
       - name: Android project banao (sirf android folder)
-        run: flutter create --platforms=android --org com.kconnpro --project-name kconn_rider .
+        run: flutter create --platforms=android --org com.khanewal --project-name kconn_rider .
+
+      - name: Package name (applicationId) lagao
+        run: python3 tool/patch_gradle.py android/app "$APP_ID"
 
       - name: Permissions + app naam lagao
         run: python3 tool/patch_manifest.py android/app/src/main/AndroidManifest.xml
@@ -44,76 +49,16 @@ jobs:
 
       - run: flutter pub get
 
-      # ---- Signing key: pehle cache se uthao ----
-      - name: Keystore cache restore
-        id: kscache
-        uses: actions/cache@v4
-        with:
-          path: rider_app/keystore_store
-          key: rider-keystore-v1
-
-      # ---- Keystore: Secrets > Cache > Naya banao ----
-      - name: Release key tayyar karo
-        id: sign
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: |
-          mkdir -p keystore_store
-          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ]; then
-            SRC=secrets
-            echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
-            PASS="$KEYSTORE_PASSWORD"; ALIAS="$KEY_ALIAS"
-          else
-            if [ -f keystore_store/upload-keystore.jks ] && [ -f keystore_store/credentials.env ]; then
-              SRC=cache
-            else
-              SRC=new
-              PASS=$(openssl rand -hex 16)
-              keytool -genkeypair -storetype PKCS12 -keystore keystore_store/upload-keystore.jks \
-                -alias kconn_rider -keyalg RSA -keysize 2048 -validity 10000 \
-                -storepass "$PASS" -keypass "$PASS" \
-                -dname "CN=K-Conn Rider, OU=App, O=K-Conn, L=Karachi, ST=Sindh, C=PK"
-              printf 'KEY_ALIAS=kconn_rider\nKEY_PASSWORD=%s\n' "$PASS" > keystore_store/credentials.env
-            fi
-            ALIAS=$(grep '^KEY_ALIAS=' keystore_store/credentials.env | cut -d= -f2-)
-            PASS=$(grep '^KEY_PASSWORD=' keystore_store/credentials.env | cut -d= -f2-)
-            cp keystore_store/upload-keystore.jks android/app/upload-keystore.jks
-          fi
-          {
-            echo "storePassword=$PASS"
-            echo "keyPassword=$PASS"
-            echo "keyAlias=$ALIAS"
-            echo "storeFile=upload-keystore.jks"
-          } > android/key.properties
-          python3 tool/patch_signing.py android/app
-          echo "source=$SRC" >> "$GITHUB_OUTPUT"
-          echo "::notice::Release key source: $SRC"
+      - name: App icon banao
+        run: dart run flutter_launcher_icons
 
       - name: Build release APK
-        run: flutter build apk --release --build-number=${{ github.run_number }} --dart-define=API_BASE=${{ github.event.inputs.api_base || 'https://YOUR-DOMAIN.com' }}
+        run: flutter build apk --release --dart-define=API_BASE=${{ env.API_BASE }}
 
-      - name: Build release AAB (Play Store ke liye)
-        run: flutter build appbundle --release --build-number=${{ github.run_number }} --dart-define=API_BASE=${{ github.event.inputs.api_base || 'https://YOUR-DOMAIN.com' }}
+      - name: APK ka naam
+        run: cp build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/88-Riders.apk"
 
-      - name: APK artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: kconn-rider-apk
-          path: rider_app/build/app/outputs/flutter-apk/app-release.apk
-
-      - name: AAB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kconn-rider-aab
-          path: rider_app/build/app/outputs/bundle/release/app-release.aab
-
-      # Key ka BACKUP (cache 7 din na chalne par khatam ho sakta hai) - ek dafa download karke mehfooz rakh lein
-      - name: Keystore backup artifact
-        if: steps.sign.outputs.source != 'secrets'
-        uses: actions/upload-artifact@v4
-        with:
-          name: kconn-rider-keystore-BACKUP
-          path: rider_app/keystore_store/
-          retention-days: 90
+          name: 88-riders-apk
+          path: rider_app/build/app/outputs/flutter-apk/88-Riders.apk

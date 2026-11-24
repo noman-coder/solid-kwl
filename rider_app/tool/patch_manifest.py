@@ -37,8 +37,8 @@ if add:
 if 'usesCleartextTraffic' not in s:
     s = s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
 
-# app ka naam
-s = re.sub(r'android:label="[^"]*"', 'android:label="K-Conn Rider"', s, count=1)
+# app ka naam (phone par icon ke neeche)
+s = re.sub(r'android:label="[^"]*"', 'android:label="88 Riders"', s, count=1)
 
 open(path, 'w', encoding='utf-8').write(s)
 print('manifest patched')

@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'api.dart';
+import 'location_hub.dart';
 
 /// Background GPS: Android "foreground service" (notification ke saath) chalata hai,
 /// is liye app minimize / screen lock par bhi location jati rehti hai.
@@ -23,7 +24,7 @@ class Tracker {
       p = await Geolocator.requestPermission();
     }
     if (p == LocationPermission.denied || p == LocationPermission.deniedForever) {
-      return 'Location ki ijazat dein: Settings > Apps > K-Conn Rider > Permissions > Location';
+      return 'Location ki ijazat dein: Settings > Apps > 88 Riders > Permissions > Location';
     }
     // "Allow all the time" - app band/minimize hone par bhi location ke liye
     if (!await Permission.locationAlways.isGranted) {
@@ -44,7 +45,7 @@ class Tracker {
       intervalDuration: const Duration(seconds: 10),
       foregroundNotificationConfig: ForegroundNotificationConfig(
         notificationTitle: 'Delivery tracking chal rahi hai',
-        notificationText: 'Customer ko aap ki live location dikh rahi hai',
+        notificationText: 'Order accept hone se deliver tak aap ki live location jati hai',
         enableWakeLock: true,
         setOngoing: true,
       ),
@@ -58,6 +59,7 @@ class Tracker {
   }
 
   static void _onPos(Position p) {
+    LocationHub.push(p); // map ko har update par (server throttle se alag)
     final now = DateTime.now();
     if (now.difference(_last).inSeconds < 8) return; // server par ~10s throttle
     _last = now;

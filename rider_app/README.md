@@ -1,41 +1,38 @@
-# K-Conn Rider (Android app)
+# 88 Riders (Khanewal Connect Rider app - Android)
 
-Rider login, Online/Offline, naye orders, Accept, Maal le liya, Deliver, aur
-**background live location** (notification ke saath, app minimize/screen lock par bhi).
+Rider login, Online/Offline, naye orders, Accept, Maal le liya, Deliver, live map + route, wallet (cash handover),
+profile, aur **background live location** (notification ke saath, app minimize/screen lock par bhi).
+
+- App ka naam: **88 Riders**
+- Package name (applicationId): `com.khanewal.riders88.app`
+  (Android mein package ka koi hissa digit se shuru nahi ho sakta, is liye `88riders` ki jagah `riders88`.)
+- Server fixed: `https://khanewalconnect.store` - app mein kahin dikhta nahi, rider badal nahi sakta.
 
 ## GitHub par APK banane ka tareeqa
-1. Pura project (rider_app folder + `.github/workflows/build_rider_apk.yml`) GitHub repo mein push karein.
-2. GitHub > **Actions** > **Build Rider APK** > **Run workflow**.
-3. `api_base` mein apni website likhein, e.g. `https://shop.example.com` (https behtar hai).
-4. 5-10 minute baad run ke neeche **Artifacts > kconn-rider-apk** download karein (zip ke andar `app-release.apk`).
-5. APK rider ke phone mein install karein (Unknown sources allow karna hoga).
+1. Pura project (`rider_app` folder + `.github/workflows/build_rider_apk.yml`) GitHub repo mein push karein.
+   **`license_private.key` push na karein** (`.gitignore` mein hai).
+2. GitHub > **Actions** > **Build Rider APK (88 Riders)** > **Run workflow** (koi input nahi).
+3. 5-10 minute baad run ke neeche **Artifacts > 88-riders-apk** download karein (zip ke andar `88-Riders.apk`).
+4. APK rider ke phone mein install karein (Unknown sources allow karna hoga).
 
-Server address baad mein bhi app ke login screen par "Server address badlein" se badal sakte hain.
-
-## Release signing (khud ba khud)
-Kuch karna nahi. **Build Rider APK** chalane par workflow:
-1. Pehli dafa khud release key banata hai aur GitHub **cache** mein rakhta hai.
-2. Agle builds mein usi cache se key uthata hai - is liye har APK usi key se sign hoti hai aur update ho jati hai.
-3. Artifacts mein 3 cheezein deta hai: `kconn-rider-apk` (APK), `kconn-rider-aab` (Play Store), aur
-   **`kconn-rider-keystore-BACKUP`** (key + password, 90 din).
-
-**Zaroori:** GitHub cache 7 din na chalne par khatam ho sakta hai. Pehle build ke baad
-`kconn-rider-keystore-BACKUP` ek dafa download karke mehfooz jagah rakh lein. Agar cache chala gaya aur backup nahi hai,
-to nayi key banegi aur purani APK ke upar update install nahi hoga (uninstall karke dobara install karna parega).
-Behtar: backup ke andar ki values ko repo Secrets (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`) mein daal dein -
-workflow pehle Secrets use karta hai.
-Backup artifact mein password hai: repo private rakhein.
+Server / naam / package badalna ho to sirf `.github/workflows/build_rider_apk.yml` ke upar wale `env` (APP_ID, API_BASE) aur
+`tool/patch_manifest.py` (app ka naam) mein badlein.
 
 ## Pehli dafa rider ko ye karna hai
 - Login karein, Online hon, order accept karein, "Maal le liya" dabayein.
 - Jab app location mange: **"Allow all the time"** chunein (warna app band hone par location nahi jayegi).
 - Battery: **Unrestricted / Don't optimize** allow karein. Xiaomi/Oppo/Vivo/Huawei/Samsung par
-  Settings > Apps > K-Conn Rider > Battery > Unrestricted, aur "Autostart" on karein.
+  Settings > Apps > 88 Riders > Battery > Unrestricted, aur "Autostart" on karein. (Profile > Permissions madad mein bhi hai.)
 - Recent apps se app ko swipe karke band na karein; minimize kar dena theek hai.
 
+## App ka dhancha
+5 tabs: Dashboard, Orders, Map, Wallet, Profile. Code: `lib/screens` (tabs), `lib/widgets`, `lib/services`
+(api, tracker, app_state, route_service, location_hub), `lib/models`. Icon: `assets/icon/` (GitHub Action `flutter_launcher_icons` se
+mipmaps banata hai). Tafseel: `docs/RIDER_PHASE4.md` ... `docs/RIDER_PHASE9.md`.
+
 ## Backend
-Server par `app/customer/views_rider_api.py` aur `app/urls.py` ke `api/rider/...` URLs chahiye
-(is project mein shamil hain). Koi nayi table nahi.
+Server par `app/customer/views_rider_api.py` aur `app/urls.py` ke `api/rider/...` URLs chahiye (is project mein shamil hain).
+Nayi tables sirf additive migrations se aati hain (0058 `RiderCashHandover`).
 
 | URL | Kaam |
 |---|---|
@@ -45,3 +42,5 @@ Server par `app/customer/views_rider_api.py` aur `app/urls.py` ke `api/rider/...
 | POST `/api/rider/orders/<id>/accept/` | order lena |
 | POST `/api/rider/orders/<id>/pickup/` , `/deliver/` | maal liya / deliver |
 | POST `/api/rider/location/` | GPS bhejna |
+| GET `/api/rider/dashboard/` `/history/` `/wallet/` `/profile/` | tabs ka data |
+| POST `/api/rider/cash/handover/` | cash handover |

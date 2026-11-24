@@ -46,6 +46,7 @@ from ..models import (
     Brand, Category, CompanyInfo, DeliveryArea, DeliveryInfo, Inventory, OrderReview, Product, RiderProfile, SaleOrder,
     StockBatch, StoreCategory, Unit, Vendor, VendorProfile, Warehouse,
 )
+from ..models import RiderCashHandover
 from . import store_orders
 from .views_reviews import vendor_rating
 from .views_customer_auth import get_client_ip, is_valid_phone, normalize_phone, safe_login
@@ -472,6 +473,8 @@ def vendor_dashboard(request):
                           .select_related('sale_order')[:5],
         'commission_percent': commission_percent(profile),
         'new_orders': SaleOrder.objects.filter(vendor=vendor, status='pending').count(),
+        'rider_cash_pending': RiderCashHandover.objects.filter(
+            receiver='vendor', vendor=vendor, status='pending').count(),
         'company_name': _company_name(),
     })
 
@@ -1049,3 +1052,50 @@ def vendor_orders_poll(request):
     new = _vendor_orders(vendor).filter(status='pending')
     latest = new.order_by('-id').values_list('id', flat=True).first() or 0
     return JsonResponse({'new': new.count(), 'latest_id': latest})
+
+
+# ============================================
+# RIDER SE CASH (Phase 2): rider ne vendor ko COD cash diya - vendor confirm / reject karta hai
+# ============================================
+
+@vendor_login_required
+def vendor_rider_cash(request):
+    """Rider ke bheje hue cash handovers: pending (Confirm / Reject) aur purani history."""
+    from .rider_cash_service import pending_for_vendor
+    profile = request.user.vendor_profile
+    vendor = profile.vendor
+    pending = list(pending_for_vendor(vendor))
+    history = list(RiderCashHandover.objects.filter(receiver='vendor', vendor=vendor)
+                   .exclude(status='pending').select_related('rider')[:50])
+    confirmed_total = (RiderCashHandover.objects.filter(receiver='vendor', vendor=vendor, status='confirmed')
+                       .aggregate(t=Sum('amount'))['t'] or Decimal('0'))
+    return render(request, 'customer_portal/vendor/rider_cash.html', {
+        'page_title': 'Rider se cash',
+        'profile': profile,
+        'pending': pending,
+        'pending_total': sum((h.amount for h in pending), Decimal('0')),
+        'history': history,
+        'confirmed_total': confirmed_total,
+        'company_name': _company_name(),
+    })
+
+
+@vendor_login_required
+@require_POST
+def vendor_rider_cash_action(request, pk, action):
+    """action: confirm | reject. Sirf apne (is vendor ke) handover par."""
+    from .rider_cash_service import HandoverError, confirm_handover, reject_handover
+    vendor = request.user.vendor_profile.vendor
+    if action not in ('confirm', 'reject'):
+        messages.error(request, '❌ Ghalat action.')
+        return redirect('vendor_rider_cash')
+    try:
+        if action == 'confirm':
+            h = confirm_handover(pk, request.user, vendor=vendor)
+            messages.success(request, f'✅ Rider {h.rider.name} se Rs. {h.amount:,.0f} cash mil gaya (confirm).')
+        else:
+            h = reject_handover(pk, request.user, request.POST.get('reason'), vendor=vendor)
+            messages.success(request, f'Handover reject kar diya. Rider {h.rider.name} ko wajah bhej di.')
+    except HandoverError as exc:
+        messages.error(request, f'❌ {exc}')
+    return redirect('vendor_rider_cash')

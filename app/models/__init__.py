@@ -48,6 +48,7 @@ _MODULES = [
     "trade.customer_portal",
     "trade.delivery",
     "trade.rider_location",
+    "trade.rider_cash",
     "trade.pos_shift",
     "trade.shop_banner",
     "trade.shop_wishlist",
