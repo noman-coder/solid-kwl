@@ -36,9 +36,33 @@ class Brand(models.Model):
         return self.name
 
 
+class MasterCategory(models.Model):
+    """Shop ki bari (master) category: Food & Drinks, Grocery, Fashion...
+    Shop home par pehle yehi dikhti hain; click karne par us ki sub-categories (Category) khulti hain.
+    Nayi Category add hone par Gemini AI / keywords khud sahi master chun leti hain (app/category_ai.py)."""
+    name = models.CharField(max_length=60, unique=True)
+    icon = models.CharField(max_length=8, blank=True, default='🛍️', help_text="Ek emoji, jaise 🍽️ 🛒 💊")
+    sort_order = models.PositiveSmallIntegerField(default=0, help_text="Chhota number pehle nazar aata hai")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = 'Master Category'
+        verbose_name_plural = '1.2a Master Categories'
+        ordering = ['sort_order', 'name']
+
+    def __str__(self):
+        return f"{self.icon} {self.name}".strip()
+
+
 # Category model to store category details
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
+    master = models.ForeignKey(
+        MasterCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='categories',
+        help_text="Shop par ye category kis bari category ke andar dikhe. Khali chhorein to AI khud chun legi.")
+    master_source = models.CharField(
+        max_length=10, blank=True, default='',
+        help_text="Master kis ne chuna: keyword / ai / fallback (check karein) / manual (admin ne)")
     min_margin_percent = models.DecimalField(
         max_digits=6, decimal_places=2, null=True, blank=True,
         validators=[MinValueValidator(0)],

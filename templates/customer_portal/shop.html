@@ -1277,10 +1277,16 @@
     <!-- ========== CATEGORY TILES (3x3: 8 categories + See all) ========== -->
     {% if home_categories %}
     <div class="app-section">
+        {% if selected_master %}
+        <div style="display:flex;align-items:center;gap:10px;margin-top:14px;">
+            <a href="{% url 'shop_home' %}" style="color:#2563eb;font-weight:700;text-decoration:none;"><i class="bi bi-arrow-left"></i> All categories</a>
+            <strong style="color:#0f172a;">{{ selected_master_name }}</strong>
+        </div>
+        {% endif %}
         <div class="hc-grid">
             {% if home_categories|length > 9 %}
                 {% for cat in home_categories|slice:":8" %}
-                <a href="?category={{ cat.id }}#products-section" class="hc-tile hc-c{{ cat.tone }}">
+                <a href="{{ cat.href }}" class="hc-tile hc-c{{ cat.tone }}">
                     <span class="hc-ico">{{ cat.icon }}</span>
                     <span class="hc-name">{{ cat.name }}</span>
                 </a>
@@ -1291,7 +1297,7 @@
                 </button>
             {% else %}
                 {% for cat in home_categories %}
-                <a href="?category={{ cat.id }}#products-section" class="hc-tile hc-c{{ cat.tone }}">
+                <a href="{{ cat.href }}" class="hc-tile hc-c{{ cat.tone }}">
                     <span class="hc-ico">{{ cat.icon }}</span>
                     <span class="hc-name">{{ cat.name }}</span>
                 </a>
@@ -1310,7 +1316,7 @@
             <div class="hc-sheet-body">
                 <div class="hc-grid hc-grid-all">
                     {% for cat in home_categories %}
-                    <a href="?category={{ cat.id }}#products-section" class="hc-tile hc-c{{ cat.tone }}">
+                    <a href="{{ cat.href }}" class="hc-tile hc-c{{ cat.tone }}">
                         <span class="hc-ico">{{ cat.icon }}</span>
                         <span class="hc-name">{{ cat.name }}</span>
                     </a>
@@ -1415,7 +1421,7 @@
     </div>
     {% endif %}
 
-    <div class="row-head" style="margin-bottom:2px"><h2>{% if search %}Results{% elif selected_category_name %}{{ selected_category_name }}{% else %}All products{% endif %}</h2></div>
+    <div class="row-head" style="margin-bottom:2px"><h2>{% if search %}Results{% elif selected_category_name %}{{ selected_category_name }}{% elif selected_master_name %}{{ selected_master_name }}{% else %}All products{% endif %}</h2></div>
 
     <!-- Live Visitor: sirf tab dikhe jab count 100 ya zyada ho (JS bhi yehi rule lagata hai) -->
     <div class="live-visitors-banner" id="liveVisitorsBanner"{% if live_visitor_count|default:0 < 100 %} style="display:none"{% endif %}>
@@ -1442,7 +1448,7 @@
             <strong>{{ total_products }}</strong> products found
         </span>
         
-        {% if search or selected_category or selected_brand or selected_sort %}
+        {% if search or selected_category or selected_master or selected_brand or selected_sort %}
         <div class="active-filters">
             {% if search %}
             <a href="?{% if selected_category %}category={{ selected_category }}&{% endif %}{% if selected_brand %}brand={{ selected_brand }}&{% endif %}{% if selected_sort %}sort={{ selected_sort }}{% endif %}" 
@@ -1453,6 +1459,15 @@
             </a>
             {% endif %}
             
+            {% if selected_master and not selected_category %}
+            <a href="?{% if search %}search={{ search|urlencode }}&{% endif %}{% if selected_brand %}brand={{ selected_brand }}&{% endif %}{% if selected_sort %}sort={{ selected_sort }}{% endif %}"
+               class="filter-chip">
+                <span class="chip-icon">🗂️</span>
+                <span>Group: <span class="chip-value">{{ selected_master_name }}</span></span>
+                <span class="chip-close"><i class="bi bi-x"></i></span>
+            </a>
+            {% endif %}
+
             {% if selected_category %}
             <a href="?{% if search %}search={{ search|urlencode }}&{% endif %}{% if selected_brand %}brand={{ selected_brand }}&{% endif %}{% if selected_sort %}sort={{ selected_sort }}{% endif %}" 
                class="filter-chip">
@@ -1643,7 +1658,7 @@
         <ul class="pagination justify-content-center flex-wrap">
             {% if page_obj.has_previous %}
             <li class="page-item">
-                <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search|urlencode }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_brand %}&brand={{ selected_brand }}{% endif %}{% if selected_sort %}&sort={{ selected_sort }}{% endif %}">
+                <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search|urlencode }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_master %}&master={{ selected_master }}{% endif %}{% if selected_brand %}&brand={{ selected_brand }}{% endif %}{% if selected_sort %}&sort={{ selected_sort }}{% endif %}">
                     <i class="bi bi-chevron-left"></i>
                 </a>
             </li>
@@ -1654,7 +1669,7 @@
                 <li class="page-item active"><span class="page-link">{{ num }}</span></li>
                 {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
                 <li class="page-item">
-                    <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search|urlencode }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_brand %}&brand={{ selected_brand }}{% endif %}{% if selected_sort %}&sort={{ selected_sort }}{% endif %}">
+                    <a class="page-link" href="?page={{ num }}{% if search %}&search={{ search|urlencode }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_master %}&master={{ selected_master }}{% endif %}{% if selected_brand %}&brand={{ selected_brand }}{% endif %}{% if selected_sort %}&sort={{ selected_sort }}{% endif %}">
                         {{ num }}
                     </a>
                 </li>
@@ -1663,7 +1678,7 @@
             
             {% if page_obj.has_next %}
             <li class="page-item">
-                <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search|urlencode }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_brand %}&brand={{ selected_brand }}{% endif %}{% if selected_sort %}&sort={{ selected_sort }}{% endif %}">
+                <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search|urlencode }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_master %}&master={{ selected_master }}{% endif %}{% if selected_brand %}&brand={{ selected_brand }}{% endif %}{% if selected_sort %}&sort={{ selected_sort }}{% endif %}">
                     <i class="bi bi-chevron-right"></i>
                 </a>
             </li>

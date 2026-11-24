@@ -39,6 +39,7 @@ jobs:
       EMAIL_HOST_USER: ${{ secrets.ORDER_ALERT_EMAILS }}
       SUMMERY_REC: ${{ secrets.SUMMERY_REC }}          # Traffic Analytics daily summary receiver
       BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}     # nayi Category -> master category (khali ho to sirf keywords chalte hain)
       BREVO_SENDER_NAME: ${{ secrets.BREVO_SENDER_NAME }}
       BREVO_SENDER_EMAIL: ${{ secrets.BREVO_SENDER_EMAIL }}
       EMAIL_HOST_PASSWORD: ${{ secrets.EMAIL_HOST_PASSWORD }}
@@ -504,6 +505,13 @@ jobs:
           else:
               print('Skipping superuser (credentials not set).')
           "
+
+      - name: Arrange existing categories into master categories (safe, additive, idempotent)
+        # Pehli run: maujooda sab categories ko master category mil jati hai (keywords + Gemini).
+        # Agli runs: sirf wo categories jin ka master nahi / jo pehle 'fallback' (Other) rahi thin dobara try hoti hain.
+        # Admin ki manual choice kabhi nahi badalti. Kuch delete/drop nahi hota. Fail ho to deploy nahi rukta.
+        run: |
+          python manage.py classify_categories --retry-fallback || echo "classify_categories skipped (non-fatal)"
 
       - name: Stop Here for migrate_now
         if: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'migrate_now' }}
