@@ -2215,6 +2215,12 @@ def cancel_order_customer(request, order_id):
                                             cancel_msg, kind='warning')
         except Exception:
             logger.exception('Cancel notify error')
+        try:
+            if order.vendor_id:
+                from .. import vendor_push        # vendor ke phone par push (customer ke cancel par)
+                vendor_push.notify_order_cancelled(order.pk)
+        except Exception:
+            logger.exception('Vendor push (cancel) hook error')
         
         return JsonResponse({
             'success': True,

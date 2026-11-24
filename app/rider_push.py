@@ -84,10 +84,13 @@ def _access_token(force_refresh=False):
 
 # ---------------------------------------------------------------- sending
 
-def build_message(token, title, body, data=None, tag=None):
-    """FCM v1 message. 'notification' wala hissa isliye ke app band ho tab bhi system khud dikhaye."""
+def build_message(token, title, body, data=None, tag=None, channel_id=None, ttl=None):
+    """FCM v1 message. 'notification' wala hissa isliye ke app band ho tab bhi system khud dikhaye.
+
+    channel_id / ttl optional hain (Vendor app apne channels aur lambi ttl ke liye use karti hai);
+    na dein to rider wala purana behaviour jyon ka tyon."""
     android_note = {
-        'channel_id': CHANNEL_ID,
+        'channel_id': channel_id or CHANNEL_ID,
         'sound': 'default',
         'notification_priority': 'PRIORITY_MAX',
         'visibility': 'PUBLIC',
@@ -98,7 +101,7 @@ def build_message(token, title, body, data=None, tag=None):
         'token': token,
         'notification': {'title': title, 'body': body},
         'data': {str(k): str(v) for k, v in (data or {}).items()},
-        'android': {'priority': 'HIGH', 'ttl': TTL, 'notification': android_note},
+        'android': {'priority': 'HIGH', 'ttl': ttl or TTL, 'notification': android_note},
     }}
 
 
@@ -117,7 +120,7 @@ def _post(url, message, access_token):
         headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json; charset=UTF-8'})
 
 
-def send_to_tokens(tokens, title, body, data=None, tag=None):
+def send_to_tokens(tokens, title, body, data=None, tag=None, channel_id=None, ttl=None):
     """Sab tokens ko bhejo (blocking). Return: {'sent': n, 'failed': n, 'dead': [tokens]}."""
     result = {'sent': 0, 'failed': 0, 'dead': []}
     info = _service_account()
@@ -135,7 +138,7 @@ def send_to_tokens(tokens, title, body, data=None, tag=None):
     url = f"https://fcm.googleapis.com/v1/projects/{info['project_id']}/messages:send"
     for tok in tokens:
         try:
-            msg = build_message(tok, title, body, data, tag)
+            msg = build_message(tok, title, body, data, tag, channel_id=channel_id, ttl=ttl)
             r = _post(url, msg, access)
             if r.status_code == 401:                    # token expire ho gaya: ek dafa naya lekar dobara
                 access = _access_token(force_refresh=True)

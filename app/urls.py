@@ -27,6 +27,7 @@ from . import views
 from .customer import views_delivery
 from .customer import views_order_tracking
 from .customer import views_rider_api
+from .customer import views_vendor_api
 from app.views_frontend.system.settings_center import settings_center
 from app.views_frontend.pos_sales import pos as pos_views
 from app.views_frontend.pos_sales import shift as shift_views
@@ -1183,6 +1184,16 @@ urlpatterns = [
      path('api/rider/wallet/', views_rider_api.api_wallet, name='rider_api_wallet'),
      path('api/rider/cash/handover/', views_rider_api.api_cash_handover, name='rider_api_cash_handover'),
      path('api/rider/cash/handovers/', views_rider_api.api_handovers, name='rider_api_handovers'),
+     # ---- Vendor Android app API (Phase V1) ----
+     path('api/vendor/login/', views_vendor_api.api_login, name='vendor_api_login'),
+     path('api/vendor/logout/', views_vendor_api.api_logout, name='vendor_api_logout'),
+     path('api/vendor/me/', views_vendor_api.api_me, name='vendor_api_me'),
+     path('api/vendor/push-token/', views_vendor_api.api_push_token, name='vendor_api_push_token'),
+     path('api/vendor/dashboard/', views_vendor_api.api_dashboard, name='vendor_api_dashboard'),
+     path('api/vendor/store/open/', views_vendor_api.api_store_open, name='vendor_api_store_open'),
+     path('api/vendor/orders/', views_vendor_api.api_orders, name='vendor_api_orders'),
+     path('api/vendor/orders/poll/', views_vendor_api.api_orders_poll, name='vendor_api_orders_poll'),
+     path('api/vendor/orders/<int:pk>/<str:action>/', views_vendor_api.api_order_action, name='vendor_api_order_action'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

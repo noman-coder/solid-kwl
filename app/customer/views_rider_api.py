@@ -494,6 +494,11 @@ def api_cash_handover(request, rider):
     else:
         vp = VendorProfile.objects.filter(vendor_id=vendor.pk).select_related('user').first()
         store_orders._notify(vp.user if vp else None, title, msg, '/shop/vendor/rider-cash/', 'info')
+        try:
+            from .. import vendor_push            # vendor app ko push (app band ho tab bhi)
+            vendor_push.notify_rider_cash(vendor.pk, rider.name, amount, h.pk)
+        except Exception:
+            logger.exception('Vendor push (rider cash) hook error')
 
     return JsonResponse({'ok': True, 'handover': _handover_json(h),
                          'message': f'Rs. {amount:,.0f} ka handover bhej diya. Receiver ke confirm ka intezar.'})
