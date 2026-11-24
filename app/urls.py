@@ -1168,6 +1168,7 @@ urlpatterns = [
      # ---- Rider Android app (token API) ----
      path('api/rider/login/', views_rider_api.api_login, name='rider_api_login'),
      path('api/rider/logout/', views_rider_api.api_logout, name='rider_api_logout'),
+     path('api/rider/push-token/', views_rider_api.api_push_token, name='rider_api_push_token'),
      path('api/rider/me/', views_rider_api.api_me, name='rider_api_me'),
      path('api/rider/online/', views_rider_api.api_online, name='rider_api_online'),
      path('api/rider/orders/', views_rider_api.api_orders, name='rider_api_orders'),

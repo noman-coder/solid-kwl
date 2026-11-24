@@ -44,6 +44,21 @@ jobs:
       - name: Permissions + app naam lagao
         run: python3 tool/patch_manifest.py android/app/src/main/AndroidManifest.xml
 
+      # Push notification (app band ho tab bhi naya order alert).
+      # GitHub Secret GOOGLE_SERVICES_JSON = Firebase ki google-services.json ka poora text.
+      # Secret na ho to APK phir bhi ban jati hai, bas push band rehta hai.
+      - name: Push notification setup (Firebase)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "google-services.json likh di."
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON secret nahi mila - APK ban jayegi lekin push notification band rahegi."
+          fi
+          python3 tool/patch_push.py android "$APP_ID"
+
       - name: Purana auto-generated test hatao
         run: rm -rf test
 

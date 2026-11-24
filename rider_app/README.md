@@ -44,3 +44,21 @@ Nayi tables sirf additive migrations se aati hain (0058 `RiderCashHandover`).
 | POST `/api/rider/location/` | GPS bhejna |
 | GET `/api/rider/dashboard/` `/history/` `/wallet/` `/profile/` | tabs ka data |
 | POST `/api/rider/cash/handover/` | cash handover |
+
+## Push notification (app band ho tab bhi naya order alert)
+
+Naya order "Ready" hote hi **online** riders ko notification aati hai (app band ho / screen lock ho, bas internet on ho).
+Vendor kisi rider ko order de to sirf usi ko "Order aap ko mila" jata hai.
+
+**Ek dafa setup (Firebase, free):**
+1. https://console.firebase.google.com par project banayein > *Add app* > Android, package name: `com.khanewal.riders88.app`
+2. `google-services.json` download karein > GitHub > Settings > Secrets > **`GOOGLE_SERVICES_JSON`** (poora text paste)
+3. Firebase > Project settings > *Service accounts* > *Generate new private key* > us JSON ko GitHub Secret
+   **`FCM_SERVICE_ACCOUNT_JSON`** mein paste karein (server ke liye)
+4. "Build Rider APK" dobara chalayein, nayi APK install karein, login karke *Notifications* allow karein.
+
+**Test:** `python manage.py test_rider_push 03xxxxxxxxx`
+
+**Xiaomi / Oppo / Vivo:** Settings > Apps > 88 Riders > *Autostart* on + Battery *No restrictions*. Warna app swipe-close karne par
+phone notification roak deta hai. (Force Stop karne par koi bhi app notification nahi le sakti.)
+

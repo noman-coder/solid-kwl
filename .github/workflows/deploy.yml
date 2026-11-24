@@ -64,6 +64,8 @@ jobs:
       ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
       CSRF_TRUSTED_ORIGINS: ${{ secrets.CSRF_TRUSTED_ORIGINS }}
       RCLONE_CONFIG_DATA: ${{ secrets.RCLONE_CONFIG_DATA }}
+      # Rider app push notification (Firebase service-account key, poora JSON)
+      FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
       # License: fixed machine id (runner machine-id changes every run) + optional first-time key
       LICENSE_MACHINE_SEED: ${{ secrets.LICENSE_MACHINE_SEED }}
       LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
@@ -153,7 +155,7 @@ jobs:
           pip install mysqlclient gunicorn "django-import-export>=3.3.0" "django>=5.2,<5.3" \
             django-dbbackup django-axes reportlab openpyxl pillow python-barcode qrcode \
             cryptography python-dotenv requests django-pwa whitenoise \
-            django-cloudinary-storage rembg numpy
+            django-cloudinary-storage rembg numpy google-auth
       - name: Parse Trigger Source & Inputs
         env:
           EVENT_NAME: ${{ github.event_name }}

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../services/app_state.dart';
+import '../services/push.dart';
 import '../theme.dart';
 import 'dashboard.dart';
 import 'map_tab.dart';
@@ -33,10 +34,17 @@ class _RiderShellState extends State<RiderShell> with WidgetsBindingObserver {
     _sub = _state.events.listen(_toast);
     WidgetsBinding.instance.addObserver(this);
     _state.start();
+    // Push: notification aane par orders refresh, tap par Orders > Naye tab
+    Push.onMessage = () => _state.refresh();
+    Push.onOpen = () => _state.goTab(1, ordersSub: 0);
+    if (Push.takePendingOpen()) _state.goTab(1, ordersSub: 0);
+    Push.start();
   }
 
   @override
   void dispose() {
+    Push.onMessage = null;
+    Push.onOpen = null;
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     _state.dispose();

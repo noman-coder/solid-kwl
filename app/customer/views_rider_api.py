@@ -31,7 +31,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from ..models import (DeliveryInfo, OrderReview, OrderTracking, RiderCashHandover, RiderProfile,
-                      SaleOrder, Vendor, VendorProfile)
+                      RiderPushToken, SaleOrder, Vendor, VendorProfile)
 from . import store_orders
 from .views_customer_auth import get_client_ip, normalize_phone
 from .views_rider_portal import (
@@ -171,6 +171,29 @@ def api_login(request):
 @rider_api(['POST'])
 def api_logout(request, rider):
     RiderProfile.objects.filter(pk=rider.pk).update(is_online=False)
+    # is phone ka push token hata do (logout ke baad notification nahi aani chahiye)
+    tok = str(_data(request).get('push_token') or '').strip()
+    if tok:
+        RiderPushToken.objects.filter(rider=rider, token=tok).delete()
+    return JsonResponse({'ok': True})
+
+
+MAX_PUSH_TOKENS = 5     # ek rider ke zyada se zyada itne phone
+
+
+@rider_api(['POST'])
+def api_push_token(request, rider):
+    """App apna FCM token yahan register karti hai (login ke baad aur token badalne par)."""
+    d = _data(request)
+    token = str(d.get('token') or '').strip()
+    if not (20 <= len(token) <= 255):
+        return _err('Push token ghalat hai.')
+    platform = (str(d.get('platform') or 'android').strip() or 'android')[:20]
+    # token ek hi rider ka: kisi aur rider ne isi phone par login kiya to token naye rider ka ho jata hai
+    RiderPushToken.objects.update_or_create(token=token, defaults={'rider': rider, 'platform': platform})
+    keep = list(RiderPushToken.objects.filter(rider=rider).order_by('-updated_at')
+                .values_list('pk', flat=True)[:MAX_PUSH_TOKENS])
+    RiderPushToken.objects.filter(rider=rider).exclude(pk__in=keep).delete()
     return JsonResponse({'ok': True})
 
 

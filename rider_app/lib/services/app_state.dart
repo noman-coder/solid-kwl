@@ -8,6 +8,7 @@ import '../models/order.dart';
 import '../models/rider.dart';
 import '../utils.dart';
 import 'api.dart';
+import 'push.dart';
 import 'tracker.dart';
 
 /// Chhota message (toast). Optional button (jaise "Dekhein").
@@ -115,6 +116,7 @@ class AppState extends ChangeNotifier {
       error = null;
       loading = false;
       notifyListeners();
+      Push.ensureRegistered(); // push token server tak na pohncha ho to dobara koshish
       try {
         await _syncTracking(d['tracking'] == true);
       } catch (_) {

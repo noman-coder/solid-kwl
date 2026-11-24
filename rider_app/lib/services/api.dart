@@ -90,12 +90,18 @@ class Api {
     await _save();
   }
 
-  static Future<void> logout() async {
+  static Future<void> logout({String? pushToken}) async {
     try {
-      await _req('POST', '/api/rider/logout/');
+      await _req('POST', '/api/rider/logout/',
+          body: {if (pushToken != null) 'push_token': pushToken});
     } catch (_) {}
     token = null;
     await _save();
+  }
+
+  /// Push notification token (FCM) server par register karo.
+  static Future<void> registerPushToken(String pushToken) async {
+    await _req('POST', '/api/rider/push-token/', body: {'token': pushToken, 'platform': 'android'});
   }
 
   static Future<Map<String, dynamic>> orders() => _req('GET', '/api/rider/orders/');

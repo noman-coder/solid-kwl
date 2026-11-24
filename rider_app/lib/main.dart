@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import 'screens/login.dart';
 import 'screens/shell.dart';
 import 'services/api.dart';
+import 'services/push.dart';
 import 'services/tracker.dart';
 import 'theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Push.init(); // Firebase (push notification). Config na ho to khamoshi se band.
   runApp(const RiderApp());
 }
 
@@ -36,7 +38,9 @@ class _RiderAppState extends State<RiderApp> {
 
   Future<void> _logout() async {
     await Tracker.stop();
-    await Api.logout();
+    final pushToken = Push.token;
+    await Push.stop();
+    await Api.logout(pushToken: pushToken);
     if (mounted) setState(() => _loggedIn = false);
   }
 

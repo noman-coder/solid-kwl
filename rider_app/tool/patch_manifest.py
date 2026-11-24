@@ -33,6 +33,11 @@ else:
 if add:
     s = s.replace('<application', add + '    <application', 1)
 
+# Push notification: FCM ka default channel (app mein Push.init() isi naam ka high-importance channel banata hai)
+META = '<meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="new_orders"/>'
+if 'default_notification_channel_id' not in s:
+    s = s.replace('</application>', '        ' + META + '\n    </application>', 1)
+
 # http server bhi chale (https behtar hai)
 if 'usesCleartextTraffic' not in s:
     s = s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)

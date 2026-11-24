@@ -1,7 +1,7 @@
 name: kconn_rider
 description: 88 Riders - Khanewal Connect rider app
 publish_to: 'none'
-version: 1.6.0+7
+version: 1.7.0+8
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -16,6 +16,10 @@ dependencies:
   url_launcher: ^6.3.0
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
+  # Push notification (app band ho tab bhi naya order alert)
+  firebase_core: '>=3.8.0'
+  firebase_messaging: '>=15.1.0'
+  flutter_local_notifications: ^18.0.1   # sirf high-importance channel banane ke liye
 
 dev_dependencies:
   flutter_lints: ^4.0.0
