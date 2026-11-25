@@ -33,13 +33,11 @@ jobs:
           - 3306:3306
         options: "--health-cmd=\"mysqladmin ping -proot\" --health-interval=10s --health-timeout=5s --health-retries=10"
 
-        
-        
     env:
       EMAIL_HOST_USER: ${{ secrets.ORDER_ALERT_EMAILS }}
-      SUMMERY_REC: ${{ secrets.SUMMERY_REC }}          # Traffic Analytics daily summary receiver
+      SUMMERY_REC: ${{ secrets.SUMMERY_REC }}
       BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}     # nayi Category -> master category (khali ho to sirf keywords chalte hain)
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       BREVO_SENDER_NAME: ${{ secrets.BREVO_SENDER_NAME }}
       BREVO_SENDER_EMAIL: ${{ secrets.BREVO_SENDER_EMAIL }}
       EMAIL_HOST_PASSWORD: ${{ secrets.EMAIL_HOST_PASSWORD }}
@@ -47,9 +45,7 @@ jobs:
       CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
       CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
       CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
-      # Pictures/media Cloudinary pe save hon (runner restart pe local media/ khali ho jata hai)
       MEDIA_STORAGE: "cloudinary"
-      # Django -> runner-local MySQL (hardcoded, no secrets needed)
       DB_HOST: "127.0.0.1"
       DB_PORT: "3306"
       DB_USER: "root"
@@ -65,9 +61,7 @@ jobs:
       ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
       CSRF_TRUSTED_ORIGINS: ${{ secrets.CSRF_TRUSTED_ORIGINS }}
       RCLONE_CONFIG_DATA: ${{ secrets.RCLONE_CONFIG_DATA }}
-      # Rider app push notification (Firebase service-account key, poora JSON)
       FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
-      # License: fixed machine id (runner machine-id changes every run) + optional first-time key
       LICENSE_MACHINE_SEED: ${{ secrets.LICENSE_MACHINE_SEED }}
       LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
       PYTHONUNBUFFERED: "1"
@@ -81,12 +75,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          cache: 'pip'
 
       - name: Wait for Previous Workflow Runs to Complete
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The older run must finish (stop server + final snapshot) BEFORE this run restores.
           CURRENT_RUN_ID="${{ github.run_id }}"
           REPO="${{ github.repository }}"
           BRANCH="${{ github.ref_name }}"
@@ -104,31 +98,28 @@ jobs:
 
       - name: Install Pips & System Tools
         run: |
+          # Only fix DNS if name resolution fails
+          if ! getent hosts archive.ubuntu.com >/dev/null 2>&1; then
+            echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf >/dev/null
+          fi
 
-          # 1. Faulty Azure/internal mirror config hata dein
-          sudo rm -f /etc/apt/apt-mirrors.txt
-          sudo rm -f /etc/apt/sources.list.d/ubuntu.sources
-          sudo truncate -s 0 /etc/apt/sources.list
+          # Ensure standard Ubuntu noble sources exist if missing
+          if [ ! -f /etc/apt/sources.list.d/ubuntu.sources ] && [ ! -s /etc/apt/sources.list ]; then
+            sudo tee /etc/apt/sources.list.d/ubuntu.sources > /dev/null <<'EOF'
+Types: deb
+URIs: http://archive.ubuntu.com/ubuntu
+Suites: noble noble-updates noble-backports
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 
-          # 2. Official Ubuntu mirrors set karein (24.04 deb822 format)
-          sudo tee /etc/apt/sources.list.d/ubuntu.sources > /dev/null <<'EOF'
-          Types: deb
-          URIs: http://archive.ubuntu.com/ubuntu
-          Suites: noble noble-updates noble-backports
-          Components: main restricted universe multiverse
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+Types: deb
+URIs: http://security.ubuntu.com/ubuntu
+Suites: noble-security
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
+          fi
 
-          Types: deb
-          URIs: http://security.ubuntu.com/ubuntu
-          Suites: noble-security
-          Components: main restricted universe multiverse
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          EOF
-
-          # 3. DNS fix
-          echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
-
-          # 4. apt update + install (retry ke sath)
           for i in 1 2 3; do
             sudo apt-get update -y && break
             echo "apt-get update failed, retry $i..."
@@ -146,17 +137,16 @@ jobs:
             sleep 10
           done
 
-          # 5. rclone fallback agar apt se install na hua ho
           if ! command -v rclone >/dev/null 2>&1; then
             curl -fsSL https://rclone.org/install.sh | sudo bash
           fi
 
-          # 6. Python dependencies
           python -m pip install --upgrade pip
           pip install mysqlclient gunicorn "django-import-export>=3.3.0" "django>=5.2,<5.3" \
             django-dbbackup django-axes reportlab openpyxl pillow python-barcode qrcode \
             cryptography python-dotenv requests django-pwa whitenoise \
             django-cloudinary-storage rembg numpy google-auth
+
       - name: Parse Trigger Source & Inputs
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -186,155 +176,147 @@ jobs:
           echo "DRIVE_DIR=${REMOTE_NAME}:hassan_shops" >> "$GITHUB_ENV"
           echo "HELPER_DIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
 
-          # --- encrypt / decrypt helper (same Fernet scheme as old snapshots) ---
           cat > "$RUNNER_TEMP/crypt.py" <<'PYEOF'
-          import base64, os, sys
-          from cryptography.fernet import Fernet
-          from cryptography.hazmat.primitives import hashes
-          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64, os, sys
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-          mode, src, dst = sys.argv[1], sys.argv[2], sys.argv[3]
-          kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
-                           salt=b'django_backup_salt_2026', iterations=100000)
-          f = Fernet(base64.urlsafe_b64encode(kdf.derive(os.environ['BACKUP_SECRET_KEY'].encode())))
-          data = open(src, 'rb').read()
-          open(dst, 'wb').write(f.encrypt(data) if mode == 'enc' else f.decrypt(data))
-          PYEOF
+mode, src, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
+                 salt=b'django_backup_salt_2026', iterations=100000)
+f = Fernet(base64.urlsafe_b64encode(kdf.derive(os.environ['BACKUP_SECRET_KEY'].encode())))
+data = open(src, 'rb').read()
+open(dst, 'wb').write(f.encrypt(data) if mode == 'enc' else f.decrypt(data))
+PYEOF
 
-          # --- notify helper: every DB / snapshot alert goes to ntfy.sh/kwlcnctstore ---
           cat > "$RUNNER_TEMP/notify.sh" <<'NEOF'
-          #!/usr/bin/env bash
-          # usage: notify.sh "<title>" "<tags>" "<priority>" "<message>"
-          TITLE="${1:-DB alert}"; TAGS="${2:-database}"; PRIO="${3:-default}"; MSG="${4:-}"
-          RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}"
-          curl -s --max-time 20 -H "Title: $TITLE" -H "Tags: $TAGS" -H "Priority: $PRIO" \
-            -d "$(printf '%s\n' "$MSG" "" "Run: $RUN_URL" "Time: $(date -u +'%Y-%m-%d %H:%M:%S UTC')")" \
-            ntfy.sh/kwlcnctstore > /dev/null || true
-          NEOF
+#!/usr/bin/env bash
+TITLE="${1:-DB alert}"; TAGS="${2:-database}"; PRIO="${3:-default}"; MSG="${4:-}"
+RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}"
+curl -s --max-time 20 -H "Title: $TITLE" -H "Tags: $TAGS" -H "Priority: $PRIO" \
+  -d "$(printf '%s\n' "$MSG" "" "Run: $RUN_URL" "Time: $(date -u +'%Y-%m-%d %H:%M:%S UTC')")" \
+  ntfy.sh/kwlcnctstore > /dev/null || true
+NEOF
           chmod +x "$RUNNER_TEMP/notify.sh"
 
-          # --- snapshot script: dump -> size guard (>=60% of restored) -> encrypt -> upload -> rotate (keep 10) ---
           cat > "$RUNNER_TEMP/snapshot.sh" <<'SHEOF'
-          #!/usr/bin/env bash
-          # usage: snapshot.sh <periodic|final>
-          MODE="${1:-periodic}"
-          cd "$GITHUB_WORKSPACE"
-          exec 9>"$HELPER_DIR/snapshot.lock"
-          flock 9
-          set -uo pipefail
+#!/usr/bin/env bash
+MODE="${1:-periodic}"
+cd "$GITHUB_WORKSPACE"
+exec 9>"$HELPER_DIR/snapshot.lock"
+flock 9
+set -uo pipefail
 
-          MIN_PCT=60        # new snapshot must be at least 60% of the restored snapshot
-          STAGE="start"
+MIN_PCT=60
+STAGE="start"
 
-          db_rows() {       # "table<TAB>approx_rows" for every table
-            MYSQL_PWD=root mysql -h 127.0.0.1 -P 3306 -u root -N -e \
-              "SET SESSION information_schema_stats_expiry=0; SELECT table_name, table_rows FROM information_schema.tables WHERE table_schema='local_django_db' AND table_type='BASE TABLE' ORDER BY table_name;" 2>/dev/null
-          }
+db_rows() {
+  MYSQL_PWD=root mysql -h 127.0.0.1 -P 3306 -u root -N -e \
+    "SET SESSION information_schema_stats_expiry=0; SELECT table_name, table_rows FROM information_schema.tables WHERE table_schema='local_django_db' AND table_type='BASE TABLE' ORDER BY table_name;" 2>/dev/null
+}
 
-          fail() {          # fail "<reason>" ["<extra detail lines>"]
-            echo "[snapshot:$MODE] FAILED at stage '$STAGE': $1"
-            bash "$HELPER_DIR/notify.sh" "DB snapshot FAILED at: $STAGE ($MODE)" "x,database" "high" \
-              "$(printf '%s\n' "Failed at: $STAGE" "Mode: $MODE" "Reason: $1" "${2:-}" "" "Upload: SKIPPED - existing Drive snapshots untouched")"
-            exit 1
-          }
+fail() {
+  echo "[snapshot:$MODE] FAILED at stage '$STAGE': $1"
+  bash "$HELPER_DIR/notify.sh" "DB snapshot FAILED at: $STAGE ($MODE)" "x,database" "high" \
+    "$(printf '%s\n' "Failed at: $STAGE" "Mode: $MODE" "Reason: $1" "${2:-}" "" "Upload: SKIPPED - existing Drive snapshots untouched")"
+  exit 1
+}
 
-          # --- license.key lives in a file, not in the DB: keep a copy on Drive (only when it changed) ---
-          if [ -f license.key ]; then
-            LH=$(sha256sum license.key | cut -d' ' -f1)
-            if [ "$LH" != "$(cat "$HELPER_DIR/license_hash" 2>/dev/null)" ]; then
-              python "$HELPER_DIR/crypt.py" enc license.key "$HELPER_DIR/license.key.enc" \
-                && rclone copyto "$HELPER_DIR/license.key.enc" "$DRIVE_DIR/license.key.enc" \
-                && echo "$LH" > "$HELPER_DIR/license_hash" \
-                && echo "[snapshot:$MODE] license.key saved to Drive" \
-                || echo "[snapshot:$MODE] license.key upload FAILED"
-            fi
-          fi
+if [ -f license.key ]; then
+  LH=$(sha256sum license.key | cut -d' ' -f1)
+  if [ "$LH" != "$(cat "$HELPER_DIR/license_hash" 2>/dev/null)" ]; then
+    python "$HELPER_DIR/crypt.py" enc license.key "$HELPER_DIR/license.key.enc" \
+      && rclone copyto "$HELPER_DIR/license.key.enc" "$DRIVE_DIR/license.key.enc" \
+      && echo "$LH" > "$HELPER_DIR/license_hash" \
+      && echo "[snapshot:$MODE] license.key saved to Drive" \
+      || echo "[snapshot:$MODE] license.key upload FAILED"
+  fi
+fi
 
-          TS=$(date +"%Y%m%d_%H%M%S")
-          NAME="db_snapshot_${TS}.sql.gz.enc"
-          RAW="$HELPER_DIR/raw_${TS}.sql.gz"
+TS=$(date +"%Y%m%d_%H%M%S")
+NAME="db_snapshot_${TS}.sql.gz.enc"
+RAW="$HELPER_DIR/raw_${TS}.sql.gz"
 
-          # --skip-add-drop-table: snapshots never contain DROP TABLE statements
-          STAGE="mysqldump"
-          if ! MYSQL_PWD=root mysqldump -h 127.0.0.1 -P 3306 -u root \
-                --set-gtid-purged=OFF --column-statistics=0 --single-transaction \
-                --skip-add-drop-table --no-tablespaces local_django_db \
-                2> "$HELPER_DIR/dump_err.log" | gzip > "$RAW"; then
-            rm -f "$RAW"
-            fail "mysqldump exited with an error" "Error: $(tail -n 3 "$HELPER_DIR/dump_err.log" | tr '\n' ' ')"
-          fi
+STAGE="mysqldump"
+if ! MYSQL_PWD=root mysqldump -h 127.0.0.1 -P 3306 -u root \
+      --set-gtid-purged=OFF --column-statistics=0 --single-transaction \
+      --skip-add-drop-table --no-tablespaces local_django_db \
+      2> "$HELPER_DIR/dump_err.log" | gzip > "$RAW"; then
+  rm -f "$RAW"
+  fail "mysqldump exited with an error" "Error: $(tail -n 3 "$HELPER_DIR/dump_err.log" | tr '\n' ' ')"
+fi
 
-          STAGE="size check (new vs restored snapshot)"
-          NEW_SIZE=$(stat -c %s "$RAW")
-          OLD_SIZE=$(cat "$HELPER_DIR/restored_size" 2>/dev/null || echo 0)
-          OLD_NAME=$(cat "$HELPER_DIR/restored_name" 2>/dev/null || echo "none (first run)")
+STAGE="size check (new vs restored snapshot)"
+NEW_SIZE=$(stat -c %s "$RAW")
+OLD_SIZE=$(cat "$HELPER_DIR/restored_size" 2>/dev/null || echo 0)
+OLD_NAME=$(cat "$HELPER_DIR/restored_name" 2>/dev/null || echo "none (first run)")
 
-          if [ "$NEW_SIZE" -lt 5000 ]; then
-            rm -f "$RAW"
-            fail "dump is near-empty ($NEW_SIZE bytes, minimum 5000)" "Restored from: $OLD_NAME ($OLD_SIZE bytes)"
-          fi
+if [ "$NEW_SIZE" -lt 5000 ]; then
+  rm -f "$RAW"
+  fail "dump is near-empty ($NEW_SIZE bytes, minimum 5000)" "Restored from: $OLD_NAME ($OLD_SIZE bytes)"
+fi
 
-          if [ "$OLD_SIZE" -gt 0 ] && [ $((NEW_SIZE * 100)) -lt $((OLD_SIZE * MIN_PCT)) ]; then
-            PCT=$((NEW_SIZE * 100 / OLD_SIZE))
-            MIN_BYTES=$((OLD_SIZE * MIN_PCT / 100))
-            db_rows > "$HELPER_DIR/rows_now.tsv"
-            TABLES_NOW=$(wc -l < "$HELPER_DIR/rows_now.tsv")
-            TABLES_THEN=$(wc -l < "$HELPER_DIR/rows_restored.tsv" 2>/dev/null || echo "?")
-            SHRUNK=""
-            if [ -s "$HELPER_DIR/rows_restored.tsv" ]; then
-              SHRUNK=$(awk -F'\t' '
-                NR==FNR { before[$1]=$2; next }
-                { seen[$1]=1; if (($1 in before) && ($2+0) < (before[$1]+0)) printf "%.0f\t%s: ~%s -> ~%s rows\n", before[$1]-$2, $1, before[$1], $2 }
-                END { for (t in before) if (!(t in seen)) printf "%.0f\t%s: MISSING (had ~%s rows)\n", 2000000000, t, before[t] }
-              ' "$HELPER_DIR/rows_restored.tsv" "$HELPER_DIR/rows_now.tsv" | sort -t"$(printf '\t')" -k1,1nr | head -n 8 | cut -f2-)
-            fi
-            rm -f "$RAW"
-            fail "new snapshot is only ${PCT}% of the restored one (minimum ${MIN_PCT}%)" \
-              "$(printf '%s\n' \
-                "Restored from: $OLD_NAME" \
-                "Restored size: $OLD_SIZE bytes" \
-                "New size: $NEW_SIZE bytes" \
-                "Minimum allowed: $MIN_BYTES bytes" \
-                "Tables: $TABLES_THEN at restore -> $TABLES_NOW now" \
-                "Biggest drops (approx rows):" \
-                "${SHRUNK:-  none detected - table row counts look unchanged}")"
-          fi
+if [ "$OLD_SIZE" -gt 0 ] && [ $((NEW_SIZE * 100)) -lt $((OLD_SIZE * MIN_PCT)) ]; then
+  PCT=$((NEW_SIZE * 100 / OLD_SIZE))
+  MIN_BYTES=$((OLD_SIZE * MIN_PCT / 100))
+  db_rows > "$HELPER_DIR/rows_now.tsv"
+  TABLES_NOW=$(wc -l < "$HELPER_DIR/rows_now.tsv")
+  TABLES_THEN=$(wc -l < "$HELPER_DIR/rows_restored.tsv" 2>/dev/null || echo "?")
+  SHRUNK=""
+  if [ -s "$HELPER_DIR/rows_restored.tsv" ]; then
+    SHRUNK=$(awk -F'\t' '
+      NR==FNR { before[$1]=$2; next }
+      { seen[$1]=1; if (($1 in before) && ($2+0) < (before[$1]+0)) printf "%.0f\t%s: ~%s -> ~%s rows\n", before[$1]-$2, $1, before[$1], $2 }
+      END { for (t in before) if (!(t in seen)) printf "%.0f\t%s: MISSING (had ~%s rows)\n", 2000000000, t, before[t] }
+    ' "$HELPER_DIR/rows_restored.tsv" "$HELPER_DIR/rows_now.tsv" | sort -t"$(printf '\t')" -k1,1nr | head -n 8 | cut -f2-)
+  fi
+  rm -f "$RAW"
+  fail "new snapshot is only ${PCT}% of the restored one (minimum ${MIN_PCT}%)" \
+    "$(printf '%s\n' \
+      "Restored from: $OLD_NAME" \
+      "Restored size: $OLD_SIZE bytes" \
+      "New size: $NEW_SIZE bytes" \
+      "Minimum allowed: $MIN_BYTES bytes" \
+      "Tables: $TABLES_THEN at restore -> $TABLES_NOW now" \
+      "Biggest drops (approx rows):" \
+      "${SHRUNK:-  none detected - table row counts look unchanged}")"
+fi
 
-          STAGE="encrypt"
-          if ! python "$HELPER_DIR/crypt.py" enc "$RAW" "$HELPER_DIR/$NAME" 2> "$HELPER_DIR/enc_err.log"; then
-            fail "encryption failed (check BACKUP_SECRET_KEY secret)" "Error: $(tail -n 2 "$HELPER_DIR/enc_err.log" | tr '\n' ' ')"
-          fi
+STAGE="encrypt"
+if ! python "$HELPER_DIR/crypt.py" enc "$RAW" "$HELPER_DIR/$NAME" 2> "$HELPER_DIR/enc_err.log"; then
+  fail "encryption failed (check BACKUP_SECRET_KEY secret)" "Error: $(tail -n 2 "$HELPER_DIR/enc_err.log" | tr '\n' ' ')"
+fi
 
-          STAGE="upload to Google Drive"
-          if ! rclone copyto "$HELPER_DIR/$NAME" "$DRIVE_DIR/$NAME" 2> "$HELPER_DIR/up_err.log"; then
-            fail "rclone upload failed" "File: $NAME ($NEW_SIZE bytes raw)
-          Error: $(tail -n 3 "$HELPER_DIR/up_err.log" | tr '\n' ' ')"
-          fi
-          rm -f "$RAW" "$HELPER_DIR/$NAME"
-          echo "[snapshot:$MODE] uploaded $NAME ($NEW_SIZE bytes raw)"
+STAGE="upload to Google Drive"
+if ! rclone copyto "$HELPER_DIR/$NAME" "$DRIVE_DIR/$NAME" 2> "$HELPER_DIR/up_err.log"; then
+  fail "rclone upload failed" "File: $NAME ($NEW_SIZE bytes raw)
+Error: $(tail -n 3 "$HELPER_DIR/up_err.log" | tr '\n' ' ')"
+fi
+rm -f "$RAW" "$HELPER_DIR/$NAME"
+echo "[snapshot:$MODE] uploaded $NAME ($NEW_SIZE bytes raw)"
 
-          # rotation: keep the latest 10 snapshots (old snapshot FILES only, never database tables)
-          STAGE="rotation"
-          if rclone lsjson "$DRIVE_DIR" --files-only --include "db_snapshot_*" \
-               | jq -r 'sort_by(.ModTime) | .[].Name' > "$HELPER_DIR/all_snaps.txt"; then
-            TOTAL=$(wc -l < "$HELPER_DIR/all_snaps.txt")
-            if [ "$TOTAL" -gt 10 ]; then
-              head -n $((TOTAL - 10)) "$HELPER_DIR/all_snaps.txt" | while read -r F; do
-                [ -n "$F" ] && rclone deletefile "$DRIVE_DIR/$F" && echo "rotated out: $F"
-              done
-            fi
-          else
-            bash "$HELPER_DIR/notify.sh" "DB snapshot uploaded, rotation FAILED" "warning" "default" \
-              "$(printf '%s\n' "Uploaded: $NAME" "Stage: rotation (listing Drive snapshots failed)" "Old snapshots were NOT deleted.")"
-          fi
+STAGE="rotation"
+if rclone lsjson "$DRIVE_DIR" --files-only --include "db_snapshot_*" \
+     | jq -r 'sort_by(.ModTime) | .[].Name' > "$HELPER_DIR/all_snaps.txt"; then
+  TOTAL=$(wc -l < "$HELPER_DIR/all_snaps.txt")
+  if [ "$TOTAL" -gt 10 ]; then
+    head -n $((TOTAL - 10)) "$HELPER_DIR/all_snaps.txt" | while read -r F; do
+      [ -n "$F" ] && rclone deletefile "$DRIVE_DIR/$F" && echo "rotated out: $F"
+    done
+  fi
+else
+  bash "$HELPER_DIR/notify.sh" "DB snapshot uploaded, rotation FAILED" "warning" "default" \
+    "$(printf '%s\n' "Uploaded: $NAME" "Stage: rotation (listing Drive snapshots failed)" "Old snapshots were NOT deleted.")"
+fi
 
-          if [ "$MODE" = "final" ]; then
-            PCT_TXT=""
-            [ "$OLD_SIZE" -gt 0 ] && PCT_TXT=" = $((NEW_SIZE * 100 / OLD_SIZE))% of restored"
-            bash "$HELPER_DIR/notify.sh" "DB Backup Successful" "white_check_mark,database" "default" \
-              "$(printf '%s\n' "Snapshot: $NAME" "Raw size: $NEW_SIZE bytes${PCT_TXT}" "Restored from: $OLD_NAME ($OLD_SIZE bytes)")"
-          fi
-          SHEOF
+if [ "$MODE" = "final" ]; then
+  PCT_TXT=""
+  [ "$OLD_SIZE" -gt 0 ] && PCT_TXT=" = $((NEW_SIZE * 100 / OLD_SIZE))% of restored"
+  bash "$HELPER_DIR/notify.sh" "DB Backup Successful" "white_check_mark,database" "default" \
+    "$(printf '%s\n' "Snapshot: $NAME" "Raw size: $NEW_SIZE bytes${PCT_TXT}" "Restored from: $OLD_NAME ($OLD_SIZE bytes)")"
+fi
+SHEOF
           chmod +x "$RUNNER_TEMP/snapshot.sh"
 
       - name: Restore Database from Google Drive (additive - never drops or wipes) (or start fresh)
@@ -342,7 +324,7 @@ jobs:
           MYSQL="mysql -h 127.0.0.1 -P 3306 -u root"
           export MYSQL_PWD=root
 
-          restore_fail() {   # restore_fail "<stage>" "<detail>"
+          restore_fail() {
             echo "RESTORE FAILED at $1: $2"
             bash "$HELPER_DIR/notify.sh" "DB RESTORE FAILED at: $1" "rotating_light,database" "urgent" \
               "$(printf '%s\n' "Failed at: $1" "Snapshot: ${FILE:-none}" "Detail: $2" "" "Nothing was dropped or wiped. Server NOT started, no snapshot will be uploaded.")"
@@ -363,7 +345,6 @@ jobs:
             FILE="$RESTORE_TARGET"
           fi
 
-          # --- license.key: Drive copy wins (it has the latest renewal); else bootstrap from secret LICENSE_KEY ---
           if rclone lsf "$DRIVE_DIR" --include "license.key.enc" | grep -q "license.key.enc"; then
             rclone copyto "$DRIVE_DIR/license.key.enc" "$HELPER_DIR/license.key.enc" \
               && python "$HELPER_DIR/crypt.py" dec "$HELPER_DIR/license.key.enc" ./license.key \
@@ -376,7 +357,6 @@ jobs:
           fi
           [ -f license.key ] && sha256sum license.key | cut -d' ' -f1 > "$HELPER_DIR/license_hash"
 
-          # database must exist, but is NEVER dropped
           $MYSQL -e "CREATE DATABASE IF NOT EXISTS local_django_db CHARACTER SET utf8mb4;"
 
           if [ -z "$FILE" ]; then
@@ -395,10 +375,6 @@ jobs:
           echo "$FILE" > "$HELPER_DIR/restored_name"
           gunzip -c ./restored.sql.gz > ./restored.sql      || restore_fail "gunzip" "snapshot is not a valid gzip"
 
-          # ADDITIVE import:
-          #   - every DROP ... statement is removed from the dump
-          #   - CREATE TABLE -> CREATE TABLE IF NOT EXISTS  (only missing tables get created)
-          #   - INSERT       -> INSERT IGNORE               (existing rows are never overwritten)
           EXPECTED=$(grep -c '^CREATE TABLE ' ./restored.sql || true)
           BEFORE=$($MYSQL -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='local_django_db';")
           echo "Tables already in DB before import: $BEFORE (kept untouched)"
@@ -414,7 +390,6 @@ jobs:
           if [ "$TABLES" -lt "$EXPECTED" ]; then
             restore_fail "verify" "snapshot has $EXPECTED tables but only $TABLES exist after import"
           fi
-          # row counts right after restore (used to explain a size drop later)
           $MYSQL -N -e "SET SESSION information_schema_stats_expiry=0; SELECT table_name, table_rows FROM information_schema.tables WHERE table_schema='local_django_db' AND table_type='BASE TABLE' ORDER BY table_name;" > "$HELPER_DIR/rows_restored.tsv"
           echo "Restore OK: $TABLES tables loaded (snapshot has $EXPECTED)."
           echo "DB_READY=true" >> "$GITHUB_ENV"
@@ -423,51 +398,50 @@ jobs:
         run: |
           python manage.py makemigrations --noinput || true
 
-          # --- guard: pending migrations may CREATE tables/columns, but must never DROP anything ---
           cat > "$HELPER_DIR/migration_guard.py" <<'PYEOF'
-          import os, sys
-          sys.path.insert(0, os.getcwd())   # project root (script itself lives in RUNNER_TEMP)
-          import django
-          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "P1.settings")
-          django.setup()
-          from django.db import connection
-          from django.db.migrations.loader import MigrationLoader
+import os, sys
+sys.path.insert(0, os.getcwd())
+import django
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "P1.settings")
+django.setup()
+from django.db import connection
+from django.db.migrations.loader import MigrationLoader
 
-          loader = MigrationLoader(connection)
-          applied = loader.applied_migrations
-          if not applied:
-              print("Fresh database: nothing to protect, guard skipped.")
-              sys.exit(0)
+loader = MigrationLoader(connection)
+applied = loader.applied_migrations
+if not applied:
+    print("Fresh database: nothing to protect, guard skipped.")
+    sys.exit(0)
 
-          def bad(op):
-              n = type(op).__name__
-              if n in ("DeleteModel", "RemoveField"):
-                  return f"{n}({getattr(op, 'name', '')}{'.' + op.model_name if hasattr(op, 'model_name') else ''})"
-              if n == "RunSQL":
-                  sql = str(getattr(op, "sql", "")).upper()
-                  if any(k in sql for k in ("DROP ", "TRUNCATE", "DELETE FROM")):
-                      return "RunSQL(DROP/TRUNCATE/DELETE)"
-              if n == "SeparateDatabaseAndState":
-                  for sub in getattr(op, "database_operations", []):
-                      r = bad(sub)
-                      if r:
-                          return r
-              return None
+def bad(op):
+    n = type(op).__name__
+    if n in ("DeleteModel", "RemoveField"):
+        return f"{n}({getattr(op, 'name', '')}{'.' + op.model_name if hasattr(op, 'model_name') else ''})"
+    if n == "RunSQL":
+        sql = str(getattr(op, "sql", "")).upper()
+        if any(k in sql for k in ("DROP ", "TRUNCATE", "DELETE FROM")):
+            return "RunSQL(DROP/TRUNCATE/DELETE)"
+    if n == "SeparateDatabaseAndState":
+        for sub in getattr(op, "database_operations", []):
+            r = bad(sub)
+            if r:
+                return r
+    return None
 
-          found = []
-          for key in loader.graph.nodes:
-              if key in applied:
-                  continue
-              for op in loader.graph.nodes[key].operations:
-                  r = bad(op)
-                  if r:
-                      found.append(f"{key[0]}.{key[1]}: {r}")
-          if found:
-              print("DESTRUCTIVE pending migrations:\n  " + "\n  ".join(found))
-              open(os.path.join(os.environ["HELPER_DIR"], "destructive.txt"), "w").write("\n".join(found))
-              sys.exit(2)
-          print("Migration guard OK: pending migrations only add things.")
-          PYEOF
+found = []
+for key in loader.graph.nodes:
+    if key in applied:
+        continue
+    for op in loader.graph.nodes[key].operations:
+        r = bad(op)
+        if r:
+            found.append(f"{key[0]}.{key[1]}: {r}")
+if found:
+    print("DESTRUCTIVE pending migrations:\n  " + "\n  ".join(found))
+    open(os.path.join(os.environ["HELPER_DIR"], "destructive.txt"), "w").write("\n".join(found))
+    sys.exit(2)
+print("Migration guard OK: pending migrations only add things.")
+PYEOF
           PYTHONPATH="$GITHUB_WORKSPACE" python "$HELPER_DIR/migration_guard.py"
           GUARD_RC=$?
           if [ "$GUARD_RC" -eq 2 ]; then
@@ -507,9 +481,6 @@ jobs:
           "
 
       - name: Arrange existing categories into master categories (safe, additive, idempotent)
-        # Pehli run: maujooda sab categories ko master category mil jati hai (keywords + Gemini).
-        # Agli runs: sirf wo categories jin ka master nahi / jo pehle 'fallback' (Other) rahi thin dobara try hoti hain.
-        # Admin ki manual choice kabhi nahi badalti. Kuch delete/drop nahi hota. Fail ho to deploy nahi rukta.
         run: |
           python manage.py classify_categories --retry-fallback || echo "classify_categories skipped (non-fatal)"
 
@@ -553,36 +524,82 @@ jobs:
       - name: Install Cloudflare Tunnel (cloudflared)
         if: env.STOP_AFTER_MIGRATE != 'true'
         run: |
-          curl -L --output cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          curl -fsSL --retry 3 --retry-delay 3 --output cloudflared \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared
           sudo mv cloudflared /usr/local/bin/cloudflared
 
       - name: Check and Kill Existing Local Processes
         if: env.STOP_AFTER_MIGRATE != 'true'
         run: |
+          pkill -f "gunicorn" || true
           pkill -f "manage.py runserver" || true
           pkill -f "cloudflared" || true
+          pkill -f "periodic_snapshot" || true
           sleep 2
 
-      - name: Start Django Server & Permanent Cloudflare Tunnel
+      - name: Start Gunicorn, Health Check & Auto-Restarting Cloudflare Tunnel
         if: env.STOP_AFTER_MIGRATE != 'true'
         run: |
-          touch django.log tunnel.log
-          PYTHONUNBUFFERED=1 python -u manage.py runserver 0.0.0.0:8000 > django.log 2>&1 &
-          cloudflared tunnel run --token "$CLOUDFLARE_TOKEN" > tunnel.log 2>&1 &
-          # periodic snapshot every 30 min so a crash / 6h kill loses at most 30 min of data
-          setsid nohup bash -c 'while true; do sleep 1800; bash "$HELPER_DIR/snapshot.sh" periodic; done' > periodic_snapshot.log 2>&1 &
-          sleep 6
-          echo "=== SERVER & CLOUDFLARE TUNNEL LIVE ==="
+          touch gunicorn.log tunnel.log periodic_snapshot.log
+
+          setsid nohup gunicorn P1.wsgi:application \
+            --bind 127.0.0.1:8000 \
+            --workers 2 \
+            --threads 4 \
+            --timeout 120 \
+            --access-logfile - \
+            --error-logfile - \
+            > gunicorn.log 2>&1 < /dev/null &
+
+          echo "Waiting for local Gunicorn health check on 127.0.0.1:8000..."
+          READY=0
+          for attempt in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ || echo "000")
+            if [ "$CODE" != "000" ]; then
+              echo "Local server responded with HTTP $CODE on attempt $attempt."
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            echo "ERROR: Local Gunicorn did not become ready in time. Recent gunicorn.log:"
+            tail -n 40 gunicorn.log || true
+            exit 1
+          fi
+
+          # Auto-restarting Cloudflare Tunnel loop
+          setsid nohup bash -c '
+            while true; do
+              echo "[$(date -u +"%Y-%m-%d %H:%M:%S UTC")] Starting cloudflared tunnel..." >> tunnel.log
+              cloudflared tunnel run --token "$CLOUDFLARE_TOKEN" >> tunnel.log 2>&1
+              EXIT_CODE=$?
+              echo "[$(date -u +"%Y-%m-%d %H:%M:%S UTC")] cloudflared exited with code $EXIT_CODE. Restarting in 3s..." >> tunnel.log
+              sleep 3
+            done
+          ' > /dev/null 2>&1 < /dev/null &
+
+          # Periodic snapshot every 30 min
+          setsid nohup bash -c '
+            while true; do
+              sleep 1800
+              bash "$HELPER_DIR/snapshot.sh" periodic
+            done
+          ' >> periodic_snapshot.log 2>&1 < /dev/null &
+
+          sleep 4
+          echo "=== GUNICORN & AUTO-RESTARTING CLOUDFLARE TUNNEL LIVE ==="
 
       - name: Get Public IP & Send Notification to ntfy
         if: env.STOP_AFTER_MIGRATE != 'true'
         run: |
-          PUBLIC_IP=$(curl -s ifconfig.me || curl -s api.ipify.org)
-          MESSAGE="Django App Live! (Local MySQL on runner, snapshots on Drive)
-          Domain: https://shops.hadi88.online
-          Direct IP: http://$PUBLIC_IP:8000"
-          curl -d "$MESSAGE" ntfy.sh/hshshehgag
+          PUBLIC_IP=$(curl -s --max-time 10 ifconfig.me || curl -s --max-time 10 api.ipify.org || echo "unknown")
+          MESSAGE="Django App Live! (Gunicorn + Local MySQL on runner, snapshots on Drive)
+Domain: https://shops.hadi88.online
+Runner IP: $PUBLIC_IP"
+          curl -s --max-time 15 -d "$MESSAGE" ntfy.sh/hshshehgag || true
 
       - name: Realtime HTTP Access Logs & Error Stream
         if: env.STOP_AFTER_MIGRATE != 'true'
@@ -594,28 +611,33 @@ jobs:
           BRANCH="${{ github.ref_name }}"
 
           for i in {1..65}; do
-            for s in {1..60}; do
-              LATEST_RUN_ID=$(gh api "repos/$REPO/actions/runs?branch=$BRANCH&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null || echo "$CURRENT_RUN_ID")
-              if [ "$LATEST_RUN_ID" -gt "$CURRENT_RUN_ID" ]; then
-                echo "Newer run ($LATEST_RUN_ID) detected. Ending log stream -> final snapshot."
-                exit 0
-              fi
+            # Check for newer run once per minute (12 x 5s) instead of every 5s
+            for s in {1..12}; do
               sleep 5
             done
+            LATEST_RUN_ID=$(gh api "repos/$REPO/actions/runs?branch=$BRANCH&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null || echo "$CURRENT_RUN_ID")
+            if [ -n "$LATEST_RUN_ID" ] && [ "$LATEST_RUN_ID" -gt "$CURRENT_RUN_ID" ]; then
+              echo "Newer run ($LATEST_RUN_ID) detected. Ending log stream -> final snapshot."
+              exit 0
+            fi
+
             echo "------------------------------------------"
-            echo "TIMESTAMP: $(date)"
-            echo "--- SERVER HTTP ACCESS LOGS ---"
-            grep -E '"GET|POST|PUT|DELETE|HEAD' django.log | tail -n 50 || echo "No HTTP requests logged yet."
+            echo "TIMESTAMP: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            echo "--- GUNICORN LOGS (TAIL) ---"
+            tail -n 30 gunicorn.log || echo "No Gunicorn logs yet."
+            echo "--- CLOUDFLARED TUNNEL LOGS (TAIL) ---"
+            tail -n 15 tunnel.log || echo "No Tunnel logs yet."
             echo "--- RECENT EXCEPTIONS / ERRORS ---"
-            grep -i -C 3 "error\|exception\|traceback" django.log | tail -n 50 || echo "No errors detected."
+            grep -i -C 2 "error\|exception\|traceback" gunicorn.log | tail -n 30 || echo "No errors detected."
           done || true
 
       - name: Final Snapshot to Google Drive (stop server first)
         if: ${{ always() && env.DB_READY == 'true' && env.STOP_AFTER_MIGRATE != 'true' }}
         run: |
-          # Stop writers first so nothing is written after the snapshot
-          pkill -f "manage.py runserver" || true
           pkill -f "cloudflared" || true
+          pkill -f "gunicorn" || true
+          pkill -f "manage.py runserver" || true
+          pkill -f "periodic_snapshot" || true
           pkill -f "snapshot.sh" || true
           sleep 3
           bash "$HELPER_DIR/snapshot.sh" final
