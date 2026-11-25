@@ -341,6 +341,31 @@ class AppState extends ChangeNotifier {
     return next;
   }
 
+  /// Detail screen jaisi jagah se aaya ApiException: session khatam / approval hat gayi ho to yahin sambhal lo
+  /// (true = sambhal liya, screen kuch na kare). Warna false - screen apna message dikhaye.
+  Future<bool> handleApiError(ApiException e) async {
+    if (_disposed) return true;
+    if (e.authExpired) {
+      await _sessionExpired();
+      return true;
+    }
+    if (e.pending) {
+      await refresh();
+      return true;
+    }
+    return false;
+  }
+
+  /// Order detail se (rider diya, status badla) lautne par: sab tabs aur dashboard taza.
+  void ordersChanged() {
+    if (_disposed) return;
+    for (final t in kOrderTabs) {
+      orderList(t).stale = true;
+    }
+    refreshOrders();
+    loadDashboard();
+  }
+
   /// Orders ka halka poll shuru (app khuli ho tab har 25 sec). Pehla poll sirf baseline banata hai.
   void startPolling() {
     _pollTimer?.cancel();

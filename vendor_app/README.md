@@ -1,7 +1,7 @@
 # Vendor App (Khanewal Connect - Android)
 
 Store owner (vendor) ke liye app. Rider app ke dhanche par bani hai; backend JSON API `api/vendor/...` hai
-(`app/customer/views_vendor_api.py`). Abhi **Phase V5**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab**.
+(`app/customer/views_vendor_api.py`). Abhi **Phase V6**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking**.
 Baqi tabs (Products, Sales, More ke andar ka kaam) "Jald aa raha hai" hain, aglay phases mein bharenge.
 
 - App ka naam (placeholder): **Vendor App** - `.github/workflows/build_vendor_apk.yml` ke `env: APP_NAME` se badlein (sirf ek jagah).
@@ -20,6 +20,9 @@ Baqi tabs (Products, Sales, More ke andar ka kaam) "Jald aa raha hai" hain, agla
 - **Orders (V5):** Naye / Chal rahe / Mukammal tabs (ginti ke saath), search (order no / naam / phone), order card (customer + call, items, COD/Online, total).
   **Qubool** (tayyari ka time: 10/20/30/45 ya apna), **Reject** (wajah list), **Tayyar**, **Deliver** (confirm) - double-tap lock, ek hi order par do jagah se action
   par saaf message. App khuli ho to har 25 sec naye orders ka poll (list khud taza + halki awaaz/vibration). Pull-to-refresh, agla page, skeleton, empty, error + retry.
+- **Order detail + live tracking (V6):** order card par tap -> status stepper (Naya > Qubool > Tayyar > Raste mein > Deliver), **live map** (OpenStreetMap: store, customer, rider; rider ki location har 12 sec),
+  rider card (call, **Rider dein / badlein**), customer card (Call / WhatsApp / Map), items photo ke saath, payment + commission ka andaza, history. Neeche wahi Qubool / Reject / Tayyar / Deliver buttons.
+  Rider na ho to "Rider abhi assign nahi hua"; order band hone par map khud hat jata hai; location purani ho to warning.
 - Token ghalat / password badalne par khud login screen par wapas.
 - Firebase + notification channels (`new_orders`, `updates`) tayyar. Push token register / alert Phase V7 mein.
 
@@ -35,8 +38,8 @@ Baqi tabs (Products, Sales, More ke andar ka kaam) "Jald aa raha hai" hain, agla
 5. Phone mein install karein (Unknown sources allow karna hoga).
 
 ## Folder
-`lib/main.dart`, `theme.dart`, `utils.dart` | `lib/services` (api, app_state, push) | `lib/models` (vendor, dashboard, orders) |
-`lib/screens` (login, shell, dashboard, orders, pending, more, placeholder_tab) |
-`lib/widgets` (empty_state, skeleton, notice_card, loading, section_title, stat_card, week_chart) |
+`lib/main.dart`, `theme.dart`, `utils.dart` | `lib/services` (api, app_state, push) | `lib/models` (vendor, dashboard, orders, order_detail) |
+`lib/screens` (login, shell, dashboard, orders, order_detail, pending, more, placeholder_tab) |
+`lib/widgets` (empty_state, skeleton, notice_card, loading, section_title, stat_card, week_chart, status_stepper, live_map) |
 `tool/` (patch_gradle, patch_manifest, patch_push - workflow `flutter create` ke baad chalata hai) | `assets/icon/`.
-Tafseel: `docs/VENDOR_PHASE3.md` (foundation), `docs/VENDOR_PHASE4.md` (dashboard), `docs/VENDOR_PHASE5.md` (orders).
+Tafseel: `docs/VENDOR_PHASE3.md` (foundation), `docs/VENDOR_PHASE4.md` (dashboard), `docs/VENDOR_PHASE5.md` (orders), `docs/VENDOR_PHASE6.md` (order detail + live tracking).

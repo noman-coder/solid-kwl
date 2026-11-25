@@ -5,6 +5,8 @@ Phase V1: foundation - login / logout / me. Baqi saari vendor API isi file ke he
 Phase V2: push-token (FCM token register/refresh) aur logout par token hatana.
 Phase V4: dashboard (aaj/hafta/mahina sale, orders, earnings, stock, 7-din chart, warnings) + store Open/Closed switch.
 Phase V5: orders tab - list (Naye / Chal rahe / Mukammal + search + page), action (accept/reject/ready/delivered), poll.
+Phase V6: order detail (items + images, customer, payment, status steps, rider, commission), live track (rider ki location),
+          assign-rider (list + assign).
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -21,7 +23,7 @@ Usool:
 import json
 import logging
 from datetime import datetime, time as dtime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from functools import wraps
 
 from django.contrib.auth import authenticate
@@ -37,8 +39,9 @@ from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from ..models import Product, RiderCashHandover, SaleOrder, VendorProfile, VendorPushToken
-from ..vendor_commission import commission_percent, vendor_earnings
+from ..models import (DeliveryInfo, OrderTracking, Product, RiderCashHandover, RiderProfile, SaleOrder,
+                      VendorProfile, VendorPushToken)
+from ..vendor_commission import CENT, HUNDRED, commission_percent, vendor_earnings
 from . import store_orders
 from .views_customer_auth import get_client_ip, normalize_phone
 from .views_reviews import vendor_rating
@@ -624,3 +627,234 @@ def api_orders_poll(request, profile):
     new = SaleOrder.objects.filter(vendor=profile.vendor, status='pending')
     latest = new.order_by('-id').values_list('id', flat=True).first() or 0
     return JsonResponse({'ok': True, 'new': new.count(), 'latest_id': latest})
+
+
+# ================================================================
+# Phase V6 - Order detail + live tracking + rider assign
+# Naya business logic nahi: rider dena `views_rider_portal._assign` se (web `vendor_assign_rider` ke wahi rules),
+# location wahi `RiderLiveLocation` jo customer ke map ko milti hai. Har endpoint par ownership:
+# vendor=profile.vendor (doosre vendor ka order -> 404 JSON, customer ka phone/location kabhi leak nahi).
+# ================================================================
+
+TRACK_STATUSES = ('assigned', 'picked_up', 'in_transit')      # rider_portal.TRACK_STATUSES jaisa (location isi dauran)
+STALE_AFTER_SEC = 120                                          # 2 min se purani location = "ruk gayi"
+_RANK = {'pending': 0, 'confirmed': 1, 'processing': 1, 'ready': 2,
+         'partially_delivered': 4, 'delivered': 4, 'invoiced': 4}
+
+
+def _owned_order(profile, pk, lock=False):
+    qs = SaleOrder.objects.filter(pk=pk, vendor=profile.vendor)
+    if lock:
+        qs = qs.select_for_update()
+    return qs.first()
+
+
+def _not_found():
+    return _err('Order nahi mila.', 404, code='not_found')
+
+
+def _delivery_of(order):
+    return DeliveryInfo.objects.filter(sale_order=order).select_related('rider').first()
+
+
+def _iso(dt):
+    return dt.isoformat() if dt else ''
+
+
+def _order_steps(order, di):
+    """Status stepper: Naya > Qubool > Tayyar > Raste mein > Deliver (reject par: Naya > Reject)."""
+    if order.status == 'cancelled':
+        return [{'key': 'new', 'label': 'Naya', 'done': True, 'at': _iso(order.order_date)},
+                {'key': 'rejected', 'label': 'Reject', 'done': True, 'at': _iso(order.vendor_responded_at),
+                 'failed': True}]
+    rank = _RANK.get(order.status, 0)
+    on_way = bool(di and di.status in ('picked_up', 'in_transit', 'delivered'))
+    delivered = rank >= 4 or bool(di and di.status == 'delivered')
+    return [
+        {'key': 'new', 'label': 'Naya', 'done': True, 'at': _iso(order.order_date)},
+        {'key': 'accepted', 'label': 'Qubool', 'done': rank >= 1, 'at': _iso(order.vendor_responded_at) if rank >= 1 else ''},
+        {'key': 'ready', 'label': 'Tayyar', 'done': rank >= 2, 'at': ''},
+        {'key': 'on_way', 'label': 'Raste mein', 'done': on_way or delivered,
+         'at': _iso(di.picked_up_at) if di and (on_way or delivered) else ''},
+        {'key': 'delivered', 'label': 'Deliver', 'done': delivered,
+         'at': _iso(di.delivered_at) if di and delivered else ''},
+    ]
+
+
+def _commission_json(profile, order):
+    """Is order ka andaza: items (discount ke baad) par vendor ka commission %. Asli hisaab bill banne par."""
+    base = Decimal(order.total_after_discount() or 0)
+    pct = commission_percent(profile)
+    comm = (base * pct / HUNDRED).quantize(CENT, ROUND_HALF_UP)
+    return {'percent': float(pct), 'base': _money(base), 'amount': _money(comm),
+            'vendor_gets': _money(base - comm), 'estimated': True}
+
+
+def _wa_url(order):
+    phone = order.customer.contact_number or ''
+    if not phone:
+        return ''
+    wa_action = {'confirmed': 'accept', 'ready': 'ready', 'delivered': 'delivered', 'cancelled': 'reject'}.get(order.status)
+    try:
+        text = (store_orders.customer_whatsapp_text(order, wa_action) if wa_action
+                else f'Assalam o Alaikum, aap ke order #{order.order_no} ke baare mein.')
+        return store_orders.whatsapp_link(phone, text) or ''
+    except Exception:           # link banane ki ghalti se detail kabhi na ruke
+        logger.exception('vendor api whatsapp link')
+        return ''
+
+
+def _detail_json(profile, order):
+    """Poora order: list wale sab keys + full items, steps, timeline, rider, commission, coordinates."""
+    out = _order_json(order)
+    items = list(order.items.all())
+    out['items'] = [{'product_id': i.product_id, 'name': (i.product.name if i.product_id else ''),
+                     'qty': _qty(i.qty), 'price': _money(i.price), 'total': _money(i.total_amt),
+                     'image': _media_url(i.product.image) if i.product_id else None} for i in items]
+    di = _delivery_of(order)
+    cust = order.customer
+    portal = getattr(cust, 'portal_profile', None) if cust else None
+    lat = getattr(portal, 'latitude', None)
+    lng = getattr(portal, 'longitude', None)
+    out['customer'] = dict(out['customer'], lat=lat, lng=lng)
+    out['coupon'] = {'code': order.coupon_code or '', 'discount': _money(order.discount_value)}
+    out['commission'] = _commission_json(profile, order)
+    out['steps'] = _order_steps(order, di)
+    out['timeline'] = [{'status': t.status, 'title': t.title or t.get_status_display(),
+                        'description': t.description or '', 'at': _iso(t.timestamp),
+                        'rider_name': t.rider_name or ''}
+                       for t in OrderTracking.objects.filter(sale_order=order).order_by('timestamp', 'pk')]
+    out['rider'] = None
+    if di is not None and (di.rider_id or di.rider_name):
+        out['rider'] = {'name': (di.rider.name if di.rider else di.rider_name) or '',
+                        'phone': (di.rider.phone if di.rider else di.rider_contact) or '',
+                        'vehicle': (di.rider.vehicle if di.rider else di.rider_vehicle) or '',
+                        'status': di.status, 'assigned_at': _iso(di.assigned_at)}
+    out['can_track'] = bool(di and di.rider_id and di.status in TRACK_STATUSES
+                            and order.status not in ('cancelled', 'delivered', 'invoiced'))
+    out['can_assign_rider'] = _can_assign(order, di)
+    out['store_point'] = ([profile.latitude, profile.longitude]
+                          if profile.latitude is not None and profile.longitude is not None else None)
+    out['whatsapp_url'] = _wa_url(order)
+    return out
+
+
+def _can_assign(order, di):
+    return order.status == 'ready' and not (di and di.status in ('picked_up', 'in_transit', 'delivered'))
+
+
+def _fresh_order(pk, vendor):
+    return (SaleOrder.objects.filter(pk=pk, vendor=vendor)
+            .select_related('customer', 'customer__portal_profile', 'delivery_info__rider')
+            .prefetch_related('items__product').first())
+
+
+@vendor_api(['GET'])
+def api_order_detail(request, profile, pk):
+    """GET /api/vendor/orders/<id>/ - order ka poora detail (sirf is vendor ka; warna 404)."""
+    order = _fresh_order(pk, profile.vendor)
+    if order is None:
+        return _not_found()
+    return JsonResponse({'ok': True, 'generated_at': now().isoformat(), 'order': _detail_json(profile, order)})
+
+
+@vendor_api(['GET'])
+def api_order_track(request, profile, pk):
+    """GET /api/vendor/orders/<id>/track/ - rider ki taza location.
+
+    Sirf jab: order is vendor ka ho, rider assign ho, aur delivery chal rahi ho (assigned/picked_up/in_transit).
+    Warna `active: false` + wajah (`reason`) - app map hide kar deti hai.
+    """
+    order = _owned_order(profile, pk)
+    if order is None:
+        return _not_found()
+    di = _delivery_of(order)
+    if order.status in ('cancelled', 'delivered', 'invoiced') or (di and di.status in ('delivered', 'cancelled')):
+        return JsonResponse({'ok': True, 'active': False, 'reason': 'finished',
+                             'message': 'Order mukammal hai - live tracking band.'})
+    if di is None or not di.rider_id:
+        return JsonResponse({'ok': True, 'active': False, 'reason': 'no_rider',
+                             'message': 'Rider abhi assign nahi hua.'})
+    if di.status not in TRACK_STATUSES:
+        return JsonResponse({'ok': True, 'active': False, 'reason': 'not_started',
+                             'message': 'Delivery abhi shuru nahi hui.'})
+    rider = di.rider
+    loc = getattr(rider, 'live_location', None)
+    cust = order.customer
+    portal = getattr(cust, 'portal_profile', None) if cust else None
+    out = {
+        'ok': True, 'active': True, 'status': di.status,
+        'rider': {'name': rider.name, 'phone': rider.phone},
+        'store': ([profile.latitude, profile.longitude]
+                  if profile.latitude is not None and profile.longitude is not None else None),
+        'dest': ([portal.latitude, portal.longitude]
+                 if portal and portal.latitude is not None and portal.longitude is not None else None),
+        'pos': None, 'age_sec': None, 'stale': True, 'heading': None,
+        'updated_at': now().isoformat(),
+    }
+    if loc:
+        age = max(0, int((now() - loc.updated_at).total_seconds()))
+        out.update({'pos': [loc.latitude, loc.longitude], 'age_sec': age,
+                    'stale': age > STALE_AFTER_SEC, 'heading': loc.heading})
+    else:
+        out['message'] = 'Rider ki location abhi nahi mili.'
+    return JsonResponse(out)
+
+
+def _riders_json():
+    from django.db.models import Count as _Count
+    rows = (RiderProfile.objects.filter(is_active=True)
+            .annotate(busy=_Count('deliveries', filter=Q(deliveries__status__in=TRACK_STATUSES)))
+            .order_by('-is_online', 'busy', 'name'))
+    return [{'id': r.pk, 'name': r.name, 'phone': r.phone, 'vehicle': r.vehicle or '',
+             'online': bool(r.is_online), 'active_orders': r.busy} for r in rows]
+
+
+@vendor_api(['GET', 'POST'])
+def api_assign_rider(request, profile, pk):
+    """GET  /api/vendor/orders/<id>/assign-rider/  -> available riders (online pehle, kam masroof pehle)
+       POST {rider_id}                             -> rider dena (web `vendor_assign_rider` ke wahi rules).
+
+    Sirf 'Ready' order par; rider maal utha chuka ho to badal nahi sakte. select_for_update: do phone se
+    ek saath dena ho to ek hi chalta hai.
+    """
+    if request.method == 'GET':
+        order = _fresh_order(pk, profile.vendor)
+        if order is None:
+            return _not_found()
+        di = _delivery_of(order)
+        return JsonResponse({'ok': True, 'can_assign': _can_assign(order, di),
+                             'current_rider_id': di.rider_id if di else None, 'riders': _riders_json()})
+
+    from .views_rider_portal import _assign           # web wali wahi logic (lazy import: circular se bachao)
+    d = _data(request)
+    try:
+        rider_id = int(d.get('rider_id'))
+    except (TypeError, ValueError):
+        return _err('Rider chunein.', 400, code='bad_rider')
+    rider = RiderProfile.objects.filter(pk=rider_id, is_active=True).first()
+    if rider is None:
+        return _err('Ye rider maujood nahi ya band hai.', 404, code='bad_rider')
+    try:
+        with transaction.atomic():
+            order = _owned_order(profile, pk, lock=True)
+            if order is None:
+                return _not_found()
+            if order.status != 'ready':
+                raise store_orders.OrderActionError('Rider sirf "Ready" order par chun sakte hain.')
+            di, _ = DeliveryInfo.objects.select_for_update().get_or_create(sale_order=order)
+            if di.status in ('picked_up', 'in_transit', 'delivered'):
+                raise store_orders.OrderActionError('Rider maal utha chuka hai, ab badal nahi sakte.')
+            _assign(order, di, rider, profile.user)
+            store_orders._notify(rider.user, f'🏍️ Naya order #{order.order_no}',
+                                 f'{store_orders.store_name(order.vendor_id)} se maal uthana hai.',
+                                 '/shop/rider/', 'info')
+    except store_orders.OrderActionError as exc:
+        out = {'ok': False, 'error': str(exc), 'message': str(exc), 'code': 'conflict'}
+        fresh = _fresh_order(pk, profile.vendor)
+        if fresh is not None:
+            out['order'] = _detail_json(profile, fresh)
+        return JsonResponse(out, status=409)
+    fresh = _fresh_order(pk, profile.vendor)
+    return JsonResponse({'ok': True, 'message': f'Order #{fresh.order_no}: rider {rider.name} ko de diya.',
+                         'order': _detail_json(profile, fresh), 'counts': _tab_counts(profile.vendor)})

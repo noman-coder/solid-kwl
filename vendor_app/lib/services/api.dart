@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/dashboard.dart';
+import '../models/order_detail.dart';
 import '../models/orders.dart';
 import '../models/vendor.dart';
 import '../utils.dart';
@@ -222,6 +223,34 @@ class Api {
   static Future<OrdersPoll> ordersPoll() async {
     final d = await _req('GET', '/api/vendor/orders/poll/');
     return OrdersPoll.fromJson(d);
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V6: Order detail + live track + rider dena
+  // ------------------------------------------------------------------
+
+  /// Order ka poora detail (items, customer, steps, rider, commission).
+  static Future<OrderDetail> orderDetail(int id) async {
+    final d = await _req('GET', '/api/vendor/orders/$id/');
+    return OrderDetail.fromJson(asMap(d['order']));
+  }
+
+  /// Rider ki taza location. `active == false` ho to map nahi dikhana.
+  static Future<TrackData> orderTrack(int id) async {
+    final d = await _req('GET', '/api/vendor/orders/$id/track/');
+    return TrackData.fromJson(d);
+  }
+
+  /// Dene layak riders (online pehle).
+  static Future<RiderList> riders(int orderId) async {
+    final d = await _req('GET', '/api/vendor/orders/$orderId/assign-rider/');
+    return RiderList.fromJson(d);
+  }
+
+  /// Rider dena. Kamyab ho to (message, taza detail).
+  static Future<({String message, OrderDetail detail})> assignRider(int orderId, int riderId) async {
+    final d = await _req('POST', '/api/vendor/orders/$orderId/assign-rider/', body: {'rider_id': riderId});
+    return (message: s(d['message']), detail: OrderDetail.fromJson(asMap(d['order'])));
   }
 
   /// Push notification token (FCM) server par register karo (app side Phase V7 mein use hoga).

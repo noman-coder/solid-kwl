@@ -10,6 +10,7 @@ import '../utils.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/notice_card.dart';
 import '../widgets/skeleton.dart';
+import 'order_detail.dart';
 
 /// Orders tab: search + 3 tabs (Naye / Chal rahe / Mukammal). Har order ka card, Qubool / Reject / Tayyar /
 /// Deliver buttons. Pull-to-refresh, neeche scroll par agla page, skeleton, empty, error + retry.
@@ -314,7 +315,7 @@ class _OrdersListState extends State<_OrdersList> with AutomaticKeepAliveClientM
 
 // ---------------------------------------------------------------- order card
 
-Color _statusColor(String status) {
+Color statusColor(String status) {
   switch (status) {
     case 'pending':
       return Colors.orange.shade800;
@@ -335,7 +336,7 @@ Color _statusColor(String status) {
   }
 }
 
-String _statusText(VendorOrder o) {
+String statusText(VendorOrder o) {
   switch (o.status) {
     case 'pending':
       return 'Naya';
@@ -357,65 +358,62 @@ String _statusText(VendorOrder o) {
   }
 }
 
+/// accept | reject | ready | delivered: zaroori sheet / confirm dikha kar server ko action bhejo.
+/// Kamyab ho to order ki nayi tab ka naam, warna (cancel / nakaam) null. Card aur Order Detail dono yahi use karte hain.
+Future<String?> runOrderAction(BuildContext context, VendorOrder order, String action) async {
+  final st = AppScope.read(context);
+  switch (action) {
+    case 'accept':
+      final picked = await showModalBottomSheet<AcceptResult>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => AcceptSheet(order: order, options: st.prepOptions),
+      );
+      if (picked == null) return null;
+      return st.orderAction(order, 'accept', prepMinutes: picked.minutes);
+    case 'reject':
+      final why = await showModalBottomSheet<RejectResult>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => RejectSheet(order: order, reasons: st.rejectReasons),
+      );
+      if (why == null) return null;
+      return st.orderAction(order, 'reject', reasonCode: why.code, reasonNote: why.note);
+    case 'delivered':
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Order deliver ho gaya?'),
+          content: Text(
+            '#${order.orderNo} - ${rs(order.total)}'
+            '${order.payment.isCod ? '\nCOD: customer se ${rs(order.total)} cash mil gaya?' : ''}',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Nahi')),
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(64, 44)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Haan, deliver'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return null;
+      return st.orderAction(order, 'delivered');
+    default:
+      return st.orderAction(order, action);
+  }
+}
+
 class _OrderCard extends StatelessWidget {
   final VendorOrder order;
   final void Function(String tab) onMoved;
   const _OrderCard({required this.order, required this.onMoved});
 
-  Future<void> _accept(BuildContext context) async {
-    final st = AppScope.read(context);
-    final res = await showModalBottomSheet<_AcceptResult>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _AcceptSheet(order: order, options: st.prepOptions),
-    );
-    if (res == null) return;
-    final next = await st.orderAction(order, 'accept', prepMinutes: res.minutes);
-    if (next != null) onMoved(next);
-  }
-
-  Future<void> _reject(BuildContext context) async {
-    final st = AppScope.read(context);
-    final res = await showModalBottomSheet<_RejectResult>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _RejectSheet(order: order, reasons: st.rejectReasons),
-    );
-    if (res == null) return;
-    final next = await st.orderAction(order, 'reject', reasonCode: res.code, reasonNote: res.note);
-    if (next != null) onMoved(next);
-  }
-
-  Future<void> _ready(BuildContext context) async {
-    final st = AppScope.read(context);
-    final next = await st.orderAction(order, 'ready');
-    if (next != null) onMoved(next);
-  }
-
-  Future<void> _delivered(BuildContext context) async {
-    final st = AppScope.read(context);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Order deliver ho gaya?'),
-        content: Text(
-          '#${order.orderNo} - ${rs(order.total)}'
-          '${order.payment.isCod ? '\nCOD: customer se ${rs(order.total)} cash mil gaya?' : ''}',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Nahi')),
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(64, 44)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Haan, deliver'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final next = await st.orderAction(order, 'delivered');
+  Future<void> _run(BuildContext context, String action) async {
+    final next = await runOrderAction(context, order, action);
     if (next != null) onMoved(next);
   }
 
@@ -427,14 +425,17 @@ class _OrderCard extends StatelessWidget {
     final when = o.tab == 'done'
         ? dateTimeText(o.createdAt)
         : '${agoText(o.createdAt)} (${clockText(o.createdAt)})';
-    final sc = _statusColor(o.status);
+    final sc = statusColor(o.status);
 
     return Card(
+      clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: o.isNew ? Colors.orange.shade400 : kBorder, width: o.isNew ? 1.5 : 1),
       ),
-      child: Padding(
+      child: InkWell(
+        onTap: () => openOrderDetail(context, o),
+        child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -450,9 +451,10 @@ class _OrderCard extends StatelessWidget {
                     color: sc.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(_statusText(o),
+                  child: Text(statusText(o),
                       style: TextStyle(color: sc, fontWeight: FontWeight.w800, fontSize: 12)),
                 ),
+                const Icon(Icons.chevron_right, color: Colors.black38),
               ],
             ),
             if (when.trim().isNotEmpty && when != ' ()')
@@ -530,7 +532,7 @@ class _OrderCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                _PayBadge(payment: o.payment),
+                PayBadge(payment: o.payment),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -545,11 +547,11 @@ class _OrderCard extends StatelessWidget {
             ),
             // ---- haalat ki tafseel
             if (o.prepMinutes != null && o.status != 'cancelled' && o.tab == 'active')
-              _InfoLine(icon: Icons.timer_outlined, text: 'Tayyari ka time: ${o.prepMinutes} min'),
+              InfoLine(icon: Icons.timer_outlined, text: 'Tayyari ka time: ${o.prepMinutes} min'),
             if (o.status == 'cancelled' && o.rejectReason.isNotEmpty)
-              _InfoLine(icon: Icons.block, text: 'Wajah: ${o.rejectReason}', color: Colors.red.shade700),
+              InfoLine(icon: Icons.block, text: 'Wajah: ${o.rejectReason}', color: Colors.red.shade700),
             if (o.delivery != null && o.delivery!.riderName.isNotEmpty)
-              _InfoLine(
+              InfoLine(
                 icon: Icons.delivery_dining,
                 text: 'Rider: ${o.delivery!.riderName}',
                 trailing: o.delivery!.riderPhone.isEmpty
@@ -568,6 +570,7 @@ class _OrderCard extends StatelessWidget {
             ],
           ],
         ),
+      ),
       ),
     );
   }
@@ -590,7 +593,7 @@ class _OrderCard extends StatelessWidget {
                   foregroundColor: Colors.red.shade700,
                   side: BorderSide(color: Colors.red.shade200),
                 ),
-                onPressed: busy ? null : () => _reject(context),
+                onPressed: busy ? null : () => _run(context, 'reject'),
                 child: const Text('Reject'),
               ),
             ),
@@ -599,7 +602,7 @@ class _OrderCard extends StatelessWidget {
             Expanded(
               flex: 2,
               child: FilledButton(
-                onPressed: busy ? null : () => _accept(context),
+                onPressed: busy ? null : () => _run(context, 'accept'),
                 child: busy ? _spinner() : const Text('Qubool karein'),
               ),
             ),
@@ -610,7 +613,7 @@ class _OrderCard extends StatelessWidget {
       return SizedBox(
         width: double.infinity,
         child: FilledButton.icon(
-          onPressed: busy ? null : () => _ready(context),
+          onPressed: busy ? null : () => _run(context, 'ready'),
           icon: busy ? _spinner() : const Icon(Icons.inventory_2_outlined),
           label: const Text('Order tayyar hai'),
         ),
@@ -620,7 +623,7 @@ class _OrderCard extends StatelessWidget {
       return SizedBox(
         width: double.infinity,
         child: FilledButton.icon(
-          onPressed: busy ? null : () => _delivered(context),
+          onPressed: busy ? null : () => _run(context, 'delivered'),
           icon: busy ? _spinner() : const Icon(Icons.check_circle_outline),
           label: const Text('Deliver ho gaya'),
         ),
@@ -630,9 +633,9 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
-class _PayBadge extends StatelessWidget {
+class PayBadge extends StatelessWidget {
   final OrderPayment payment;
-  const _PayBadge({required this.payment});
+  const PayBadge({required this.payment});
 
   @override
   Widget build(BuildContext context) {
@@ -648,12 +651,12 @@ class _PayBadge extends StatelessWidget {
   }
 }
 
-class _InfoLine extends StatelessWidget {
+class InfoLine extends StatelessWidget {
   final IconData icon;
   final String text;
   final Color? color;
   final Widget? trailing;
-  const _InfoLine({required this.icon, required this.text, this.color, this.trailing});
+  const InfoLine({required this.icon, required this.text, this.color, this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -674,22 +677,22 @@ class _InfoLine extends StatelessWidget {
 
 // ---------------------------------------------------------------- accept sheet
 
-class _AcceptResult {
+class AcceptResult {
   final int? minutes; // null = bina time ke qubool
-  const _AcceptResult(this.minutes);
+  const AcceptResult(this.minutes);
 }
 
 /// Qubool karte waqt tayyari ka time: chips (10/20/30/45) ya apna time (1-600 minute).
-class _AcceptSheet extends StatefulWidget {
+class AcceptSheet extends StatefulWidget {
   final VendorOrder order;
   final List<int> options;
-  const _AcceptSheet({required this.order, required this.options});
+  const AcceptSheet({required this.order, required this.options});
 
   @override
-  State<_AcceptSheet> createState() => _AcceptSheetState();
+  State<AcceptSheet> createState() => AcceptSheetState();
 }
 
-class _AcceptSheetState extends State<_AcceptSheet> {
+class AcceptSheetState extends State<AcceptSheet> {
   final TextEditingController _custom = TextEditingController();
   int? _selected;
   String? _error;
@@ -717,7 +720,7 @@ class _AcceptSheetState extends State<_AcceptSheet> {
       }
       minutes = v;
     }
-    Navigator.pop(context, _AcceptResult(minutes));
+    Navigator.pop(context, AcceptResult(minutes));
   }
 
   @override
@@ -785,23 +788,23 @@ class _AcceptSheetState extends State<_AcceptSheet> {
 
 // ---------------------------------------------------------------- reject sheet
 
-class _RejectResult {
+class RejectResult {
   final String code;
   final String note;
-  const _RejectResult(this.code, this.note);
+  const RejectResult(this.code, this.note);
 }
 
 /// Reject karne ki wajah (zaroori). "Doosri wajah" par note likhna zaroori.
-class _RejectSheet extends StatefulWidget {
+class RejectSheet extends StatefulWidget {
   final VendorOrder order;
   final List<RejectReason> reasons;
-  const _RejectSheet({required this.order, required this.reasons});
+  const RejectSheet({required this.order, required this.reasons});
 
   @override
-  State<_RejectSheet> createState() => _RejectSheetState();
+  State<RejectSheet> createState() => RejectSheetState();
 }
 
-class _RejectSheetState extends State<_RejectSheet> {
+class RejectSheetState extends State<RejectSheet> {
   final TextEditingController _note = TextEditingController();
   String? _code;
   String? _error;
@@ -823,7 +826,7 @@ class _RejectSheetState extends State<_RejectSheet> {
       setState(() => _error = '"Doosri wajah" par wajah likhna zaroori hai');
       return;
     }
-    Navigator.pop(context, _RejectResult(code, note));
+    Navigator.pop(context, RejectResult(code, note));
   }
 
   @override

@@ -1193,6 +1193,10 @@ urlpatterns = [
      path('api/vendor/store/open/', views_vendor_api.api_store_open, name='vendor_api_store_open'),
      path('api/vendor/orders/', views_vendor_api.api_orders, name='vendor_api_orders'),
      path('api/vendor/orders/poll/', views_vendor_api.api_orders_poll, name='vendor_api_orders_poll'),
+     # ---- Phase V6: order detail / live track / rider dena (generic <action> route se PEHLE rakhna zaroori hai) ----
+     path('api/vendor/orders/<int:pk>/', views_vendor_api.api_order_detail, name='vendor_api_order_detail'),
+     path('api/vendor/orders/<int:pk>/track/', views_vendor_api.api_order_track, name='vendor_api_order_track'),
+     path('api/vendor/orders/<int:pk>/assign-rider/', views_vendor_api.api_assign_rider, name='vendor_api_assign_rider'),
      path('api/vendor/orders/<int:pk>/<str:action>/', views_vendor_api.api_order_action, name='vendor_api_order_action'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),

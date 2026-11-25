@@ -1,7 +1,7 @@
 name: kconn_vendor
 description: Khanewal Connect Vendor app (store owner ke liye)
 publish_to: 'none'
-version: 0.5.0+5
+version: 0.6.0+6
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -12,6 +12,9 @@ dependencies:
   http: ^1.2.2
   shared_preferences: ^2.3.2
   url_launcher: ^6.3.0
+  # Phase V6: live map (OpenStreetMap, free)
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
   # Push (Phase V3 mein sirf Firebase + channels; token register / alert Phase V7 mein)
   firebase_core: '>=3.8.0'
   firebase_messaging: '>=15.1.0'
