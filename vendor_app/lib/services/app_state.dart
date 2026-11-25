@@ -468,6 +468,18 @@ class AppState extends ChangeNotifier {
     await loadProducts(productFilter);
   }
 
+  /// Phase V10: Stock screen se stock badla - Products ki lists aur dashboard (kam stock ginti) purane ho gaye.
+  void stockChanged() {
+    for (final f in kProductFilters) {
+      if (productList(f).loaded) productList(f).stale = true;
+    }
+    notifyListeners();
+    if (approved) loadDashboard();
+  }
+
+  /// Phase V10: Stock screen ko token expire hone par session band karne ke liye.
+  Future<void> handleAuthExpired() => _sessionExpired();
+
   /// Pull-to-refresh / app resume: khula chip taza, baqi agli dafa khulne par.
   Future<void> refreshProducts() async {
     if (!approved) return;

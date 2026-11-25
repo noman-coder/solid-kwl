@@ -11,6 +11,8 @@ Phase V8: products tab - list (search/filter/page), toggle (shop par show/hide),
 Phase V9-A: product add/edit - form-data (category/brand/unit list + limits + edit ke liye maujooda values),
           add (POST products/), edit (POST products/<id>/), naya category/brand/unit (POST masters/<kind>/).
           Validation web wali `_clean_product_form` / `_validate_image` hi hai. Photo optional hai (V9-B: app camera/gallery se bhejti hai).
+Phase V10: stock tools - stock list (kam / khatam), stock adjust (add / minus + wajah, bulk), per-product threshold, stock history.
+          Stock add/minus ki logic `vendor_stock.py` (add: `_add_stock`, minus: FIFO); history `VendorStockLog` (migration 0062).
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -46,9 +48,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from ..models import (Brand, Category, DeliveryInfo, Inventory, OrderTracking, Product, RiderCashHandover, RiderProfile, SaleOrder,
-                      Unit, VendorProfile, VendorPushToken)
+                      Unit, VendorProfile, VendorPushToken, VendorStockLog)
 from ..vendor_commission import CENT, HUNDRED, commission_percent, vendor_earnings
-from . import store_orders
+from . import store_orders, vendor_stock
 from .views_customer_auth import get_client_ip, normalize_phone
 from .views_reviews import vendor_rating
 from .views_vendor_portal import (
@@ -1028,6 +1030,13 @@ def api_product_toggle(request, profile, pk):
                          'counts': _product_counts(vendor)})
 
 
+def _stock_now(product, warehouse):
+    if not warehouse:
+        return 0.0
+    return float(Inventory.objects.filter(product=product, warehouse=warehouse)
+                 .values_list('stock', flat=True).first() or 0)
+
+
 def _quick_items(d):
     """Body se items: {items:[{id, price, discount?, add?}]} ya ek product ka seedha {id, price, ...}."""
     items = d.get('items')
@@ -1089,8 +1098,14 @@ def api_products_quick_update(request, profile):
             price_raw = str(product.original_price if product.original_price and product.original_price > 0
                             else product.price)
         discount_raw = _raw(it['discount']) if 'discount' in it else str(product.discount_percentage or 0)
+        stock_before = _stock_now(product, warehouse)
         status, errs = quick_update_product(product, price_raw, discount_raw, _raw(it.get('add')) or '0',
                                             pct, vendor, warehouse)
+        if status == 'changed':                    # Phase V10: stock add hua ho to history mein bhi likho
+            added = vendor_stock.parse_qty(_raw(it.get('add')) or '0')
+            if added:
+                vendor_stock.log_quick_update_add(profile, product, added, stock_before,
+                                                  _stock_now(product, warehouse))
         row = {'id': pid, 'status': status}
         if status == 'error':
             row['error'] = errs[0] if errs else 'Update nahi ho saka.'
@@ -1410,3 +1425,228 @@ def api_create_master(request, profile, kind):
                          'existed': bool(payload.get('existed')),
                          'message': 'Pehle se maujood hai, wohi chun liya.' if payload.get('existed')
                          else 'Naya naam jod diya.'})
+
+
+# ================================================================
+# Phase V10: stock & inventory tools
+# ================================================================
+
+STOCK_PAGE_SIZE = 30
+STOCK_FILTERS = ('need', 'low', 'out', 'all')       # need = kam + khatam (default)
+STOCK_ADJUST_MAX_ITEMS = 50
+STOCK_THRESHOLD_MAX = 1_000_000
+STOCK_HISTORY_PAGE_SIZE = 30
+
+
+def _stock_reasons():
+    return {k: [{'code': c, 'label': l} for c, l in v.items()] for k, v in vendor_stock.REASONS.items()}
+
+
+def _stock_product_json(p, reserved=0.0):
+    """Product ka card + stock ki tafseel (maujooda, reserved, bechne layak)."""
+    j = _product_json(p)
+    stock = float(getattr(p, 'stk', 0) or 0)
+    j['reserved'] = _qty(reserved)
+    j['available'] = _qty(max(stock - float(reserved or 0), 0))
+    return j
+
+
+def _reserved_map(ids):
+    wh = _stock_warehouse()
+    if not wh or not ids:
+        return {}
+    return {r['product_id']: r['reserved_stock'] for r in
+            Inventory.objects.filter(warehouse=wh, product_id__in=ids).values('product_id', 'reserved_stock')}
+
+
+def _stock_summary(vendor):
+    c = _product_counts(vendor)
+    return {'low': c['low'], 'out': c['out'], 'ok': max(c['approved'] - c['low'] - c['out'], 0),
+            'approved': c['approved'], 'default_threshold': LOW_STOCK_DEFAULT}
+
+
+@vendor_api(['GET'])
+def api_stock(request, profile):
+    """GET /api/vendor/stock/?filter=need|low|out|all&q=&page=1
+
+    Sirf approved products (stock unhi ka matlab rakhta hai). filter: need (kam + khatam, default) | low | out | all.
+    q: naam ya barcode (barcode scan isi se). Sab se kam stock pehle. Page 30 ka, `has_more`.
+    `summary`: kam / khatam / theek ginti + default threshold. `reasons`: add/minus ki wajah ki list.
+    """
+    vendor = profile.vendor
+    flt = request.GET.get('filter', 'need')
+    if flt not in STOCK_FILTERS:
+        flt = 'need'
+    q = (request.GET.get('q') or '').strip()[:60]
+    page = _parse_page(request.GET.get('page'))
+
+    qs = _product_qs(vendor).filter(approval_status='approved')
+    if q:
+        qs = qs.filter(Q(name__icontains=q) | Q(barcode__icontains=q))
+    if flt == 'out':
+        qs = qs.filter(stk__lte=0)
+    elif flt == 'low':
+        qs = qs.filter(stk__gt=0, stk__lte=F('thr'))
+    elif flt == 'need':
+        qs = qs.filter(stk__lte=F('thr'))
+    qs = qs.order_by('stk', 'name', 'pk')
+
+    start = (page - 1) * STOCK_PAGE_SIZE
+    rows = list(qs[start:start + STOCK_PAGE_SIZE + 1])
+    has_more = len(rows) > STOCK_PAGE_SIZE
+    rows = rows[:STOCK_PAGE_SIZE]
+    reserved = _reserved_map([p.pk for p in rows])
+    return JsonResponse({
+        'ok': True,
+        'generated_at': now().isoformat(),
+        'filter': flt,
+        'q': q,
+        'page': page,
+        'has_more': has_more,
+        'summary': _stock_summary(vendor),
+        'reasons': _stock_reasons(),
+        'products': [_stock_product_json(p, reserved.get(p.pk, 0)) for p in rows],
+    })
+
+
+def _adjust_items(d):
+    """Body: {items:[{id, mode, qty, reason?, note?}]} ya ek product ka seedha {id, mode, qty, ...}."""
+    items = d.get('items')
+    if items is None and d.get('id') is not None:
+        items = [d]
+    return items if isinstance(items, list) else None
+
+
+@vendor_api(['POST'])
+def api_stock_adjust(request, profile):
+    """POST /api/vendor/stock/adjust/
+
+    Body: {items: [{id, mode: 'add'|'minus', qty, reason, note?}], request_key?}  (ek product ho to seedha
+    {id, mode, qty, ...} bhi chalta hai). Har product alag transaction: ek ghalat ho to baqi phir bhi lagte hain;
+    `results` mein har ek ka nateeja. Negative stock nahi banta. `request_key` (8-64 akshar) wahi dobara bhejein
+    to stock dobara nahi badalta (net toot kar retry). Har kamyab tabdeeli `VendorStockLog` mein.
+    """
+    vendor = profile.vendor
+    d = _data(request)
+    items = _adjust_items(d)
+    if not items:
+        return _err('Koi product nahi bheja.', 400, code='no_items')
+    if len(items) > STOCK_ADJUST_MAX_ITEMS:
+        return _err(f'Ek baar mein {STOCK_ADJUST_MAX_ITEMS} se zyada products nahi.', 400, code='too_many')
+
+    base_key = str(d.get('request_key') or '').strip()
+    if base_key and not _REQUEST_KEY_RE.match(base_key):
+        base_key = ''
+    warehouse = _stock_warehouse()
+    results, changed, errors, seen = [], 0, [], set()
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            continue
+        try:
+            pid = int(it.get('id'))
+        except (TypeError, ValueError):
+            continue
+        if pid in seen:
+            continue
+        seen.add(pid)
+        key = str(it.get('request_key') or '').strip()
+        if not _REQUEST_KEY_RE.match(key):
+            key = f'{base_key}-{pid}'[:64] if base_key else ''
+        mode = str(it.get('mode') or '').strip().lower()
+        status, res = vendor_stock.adjust_stock(
+            profile, pid, mode, it.get('qty'), it.get('reason'), it.get('note'), key, warehouse)
+        row = {'id': pid, 'status': status}
+        if status == 'error':
+            row['error'] = res['error']
+            row['code'] = res.get('code', 'error')
+            errors.append(res['error'])
+        else:
+            row.update(before=res['before'], after=res['after'], qty=res['qty'], kind=res['kind'])
+            if status == 'ok':
+                changed += 1
+        results.append(row)
+
+    if not results:
+        return _err('Koi product nahi bheja.', 400, code='no_items')
+    ids = [r['id'] for r in results]
+    fresh = {p.pk: p for p in _product_qs(vendor).filter(pk__in=ids)}
+    reserved = _reserved_map(ids)
+    for r in results:
+        if r['id'] in fresh:
+            r['product'] = _stock_product_json(fresh[r['id']], reserved.get(r['id'], 0))
+
+    done = [r for r in results if r['status'] in ('ok', 'same')]
+    if done and not errors:
+        msg = 'Stock update ho gaya.' if len(done) == 1 else f'{len(done)} products ka stock update ho gaya.'
+    elif done:
+        msg = f'{len(done)} update hue, {len(errors)} mein masla.'
+    else:
+        msg = errors[0] if errors else 'Koi tabdeeli nahi mili.'
+    out = {'ok': bool(done) or not errors, 'message': msg, 'changed': changed, 'results': results,
+           'summary': _stock_summary(vendor), 'counts': _product_counts(vendor)}
+    if not out['ok']:
+        out['error'] = msg
+        return JsonResponse(out, status=400)
+    return JsonResponse(out)
+
+
+@vendor_api(['POST'])
+def api_stock_threshold(request, profile):
+    """POST /api/vendor/stock/threshold/   body: {id, threshold}
+
+    Is product ka \"kam stock\" ka nishan (is se kam ya barabar = kam; push alert bhi isi par). 1 se 1,000,000.
+    Sirf apna product; sirf yahi ek column badalta hai (product dobara save nahi hota).
+    """
+    vendor = profile.vendor
+    d = _data(request)
+    try:
+        pid = int(d.get('id'))
+    except (TypeError, ValueError):
+        return _err('Product chunein.', 400, code='bad_id')
+    try:
+        thr = float(str(d.get('threshold')).strip())
+    except (TypeError, ValueError):
+        return _err('Hadd sahi likhein.', 400, code='bad_threshold')
+    if not (1 <= thr <= STOCK_THRESHOLD_MAX) or thr != thr:
+        return _err(f'Hadd 1 se {STOCK_THRESHOLD_MAX:,} ke beech honi chahiye.', 400, code='bad_threshold')
+    thr = round(thr, 3)
+    with transaction.atomic():
+        product = Product.objects.select_for_update().filter(pk=pid, vendor=vendor).first()
+        if product is None:
+            return _err('Ye product nahi mila.', 404, code='not_found')
+        Product.objects.filter(pk=product.pk).update(low_stock_threshold=thr)
+    fresh = _product_qs(vendor).filter(pk=pid).first()
+    reserved = _reserved_map([pid])
+    return JsonResponse({'ok': True, 'message': 'Kam stock ki hadd badal gayi.',
+                         'product': _stock_product_json(fresh, reserved.get(pid, 0)),
+                         'summary': _stock_summary(vendor)})
+
+
+@vendor_api(['GET'])
+def api_stock_history(request, profile):
+    """GET /api/vendor/stock/history/?product=<id>&page=1
+
+    Stock ki tabdeeliyon ka record (naya pehle): kitna tha -> kitna hua, wajah, kab. `product` na ho to
+    poore store ka. Sirf apni entries."""
+    page = _parse_page(request.GET.get('page'))
+    qs = VendorStockLog.objects.filter(profile=profile).select_related('product')
+    raw = request.GET.get('product')
+    if raw:
+        try:
+            qs = qs.filter(product_id=int(raw))
+        except (TypeError, ValueError):
+            return _err('Product sahi nahi.', 400, code='bad_id')
+    start = (page - 1) * STOCK_HISTORY_PAGE_SIZE
+    rows = list(qs[start:start + STOCK_HISTORY_PAGE_SIZE + 1])
+    has_more = len(rows) > STOCK_HISTORY_PAGE_SIZE
+    rows = rows[:STOCK_HISTORY_PAGE_SIZE]
+    labels = {**vendor_stock.ADD_REASONS, **vendor_stock.MINUS_REASONS}
+    return JsonResponse({
+        'ok': True, 'page': page, 'has_more': has_more,
+        'logs': [{
+            'id': r.pk, 'product_id': r.product_id, 'product': r.product.name,
+            'kind': r.kind, 'qty': _qty(r.qty), 'before': _qty(r.before), 'after': _qty(r.after),
+            'reason': r.reason, 'reason_label': labels.get(r.reason, ''), 'note': r.note,
+            'source': r.source, 'at': _iso(r.created_at),
+        } for r in rows],
+    })

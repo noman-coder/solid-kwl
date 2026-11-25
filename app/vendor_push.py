@@ -17,7 +17,7 @@ Channels (vendor app V7 mein inhi naam ke channel banayegi):
   updates     -> 'Baqi updates' (cancel, cash, review, stock)
 
 Message `data` mein hamesha 'type' hota hai (tap par app ko pata chale kahan kholna hai):
-  new_order | order_cancelled | rider_cash | review | low_stock | out_of_stock | test
+  new_order | order_cancelled | rider_cash | review | low_stock | out_of_stock | stock_summary | test
 """
 import logging
 import threading
@@ -270,3 +270,32 @@ def check_stock_alert(product_id):
             logger.exception('Vendor push (stock) failed for product %s', product_id)
 
     _on_commit(_go)
+
+
+STOCK_SUMMARY_SECONDS = 20 * 3600     # roz ek summary (cron ek-do dafa chal jaye to bhi dobara nahi)
+
+
+def notify_stock_summary(vendor_id, low, out, names=None):
+    """Din mein ek dafa: kitne products kam / khatam hain (spam nahi: vendor ko din mein ek hi summary).
+
+    Blocking nahi, kabhi exception nahi. Return: True = bheji gayi.
+    """
+    try:
+        if not vendor_id or (low + out) <= 0 or not is_configured():
+            return False
+        if not _first_time(f'vpush:stock-summary:{vendor_id}', STOCK_SUMMARY_SECONDS):
+            return False
+        parts = []
+        if out:
+            parts.append(f'{out} khatam')
+        if low:
+            parts.append(f'{low} kam')
+        body = ', '.join(parts) + ' hain.'
+        if names:
+            body += ' ' + ', '.join(names[:3]) + ('...' if len(names) > 3 else '')
+        return bool(notify_vendor(vendor_id, '📦 Aaj ka stock hisaab', body,
+                                  data={'type': 'stock_summary', 'low': low, 'out': out},
+                                  channel=UPDATES_CHANNEL, tag='stock-summary'))
+    except Exception:
+        logger.exception('Vendor push (stock summary) failed for vendor %s', vendor_id)
+        return False

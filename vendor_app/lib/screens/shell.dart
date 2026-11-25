@@ -18,6 +18,7 @@ import 'orders.dart';
 import 'pending.dart';
 import 'placeholder_tab.dart';
 import 'products.dart';
+import 'stock.dart';
 
 /// Login ke baad ka main screen: 5 tabs (Dashboard, Orders, Products, Sales, More).
 /// Approval baqi ho to sirf PendingScreen. Dashboard (V4), Orders (V5) aur Products (V8) tabs bhar chuke hain; baqi tabs
@@ -127,6 +128,8 @@ class _VendorShellState extends State<VendorShell> with WidgetsBindingObserver {
       if (t.isNewOrder || t.type == 'order_cancelled') _state.ordersChanged(); // list bhi taza
     } else if (t.isStock) {
       _state.goTab(2);
+      _state.stockChanged(); // lists purani: taza ho jayen
+      unawaited(openStockScreen(context)); // seedha Stock screen (kam / khatam list)
     } else {
       _state.goTab(0);
       _state.loadDashboard();

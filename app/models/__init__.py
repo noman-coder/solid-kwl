@@ -51,6 +51,7 @@ _MODULES = [
     "trade.rider_cash",
     "trade.rider_push",
     "trade.vendor_push",
+    "trade.vendor_stock",
     "trade.pos_shift",
     "trade.shop_banner",
     "trade.shop_wishlist",

@@ -1,7 +1,7 @@
 # Vendor App (Khanewal Connect - Android)
 
 Store owner (vendor) ke liye app. Rider app ke dhanche par bani hai; backend JSON API `api/vendor/...` hai
-(`app/customer/views_vendor_api.py`). Abhi **Phase V9-B**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)**.
+(`app/customer/views_vendor_api.py`). Abhi **Phase V10**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)** + **Stock section (kam / khatam list, stock add / kam, kai products ek saath, kam-stock ki hadd, history)**.
 Baqi tabs (Sales, More ke andar ka kaam) "Jald aa raha hai" hain, aglay phases mein bharenge.
 
 - App ka naam (placeholder): **Vendor App** - `.github/workflows/build_vendor_apk.yml` ke `env: APP_NAME` se badlein (sirf ek jagah).
@@ -60,3 +60,13 @@ Baqi tabs (Sales, More ke andar ka kaam) "Jald aa raha hai" hain, aglay phases m
 `lib/widgets` (empty_state, skeleton, notice_card, loading, section_title, stat_card, week_chart, status_stepper, live_map, in_app_banner) |
 `tool/` (patch_gradle, patch_manifest, patch_push, patch_notification + `res/new_order.wav` - workflow `flutter create` ke baad chalata hai) | `assets/icon/`.
 Tafseel: `docs/VENDOR_PHASE3.md` (foundation), `docs/VENDOR_PHASE4.md` (dashboard), `docs/VENDOR_PHASE5.md` (orders), `docs/VENDOR_PHASE6.md` (order detail + live tracking), `docs/VENDOR_PHASE7.md` (push notifications).
+
+## Phase V10: Stock & inventory (Products tab -> upar ka Stock nishan)
+- Stock screen: chips **Kam + Khatam / Kam / Khatam / Sab** (ginti ke saath), search (naam / barcode), har card par **Stock add** aur **Kam karein**,
+  teen-dot menu mein **kam-stock ki hadd badlein** aur **is ki history**. Upar history nishan = poore store ki history.
+- **Stock add / kam sheet:** quantity, wajah (naya maal / wapsi / kharab / expire / gum ...), note, "Stock: 5 -> 35" preview. Negative stock ya orders ke liye
+  roka hua (reserved) stock kam nahi hota - server saaf message deta hai. Net toot kar dobara dabane par stock do dafa nahi lagta.
+- **Bulk:** upar ke "+" nishan se kai products ka naya stock ek screen par likh kar ek tap mein add.
+- Push: stock kam / khatam hote hi alert (din mein ek dafa per product) + roz ek **summary** push (server par `python manage.py vendor_stock_summary` cron se).
+  Push par tap = seedha Stock screen.
+- Barcode scan (optional) abhi nahi: search box mein barcode likhne / bolne se product mil jata hai (naya native package nahi joda).

@@ -4,7 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 const String kAppName = 'Vendor App';
 
 /// App ka version (pubspec.yaml ke version se milana).
-const String kAppVersion = '0.9.0 (9)';
+const String kAppVersion = '0.10.0 (11)';
 
 /// Kisi bhi value ko safe text banao (null -> '').
 String s(dynamic v) => v == null ? '' : v.toString();

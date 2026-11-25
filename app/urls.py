@@ -1206,6 +1206,11 @@ urlpatterns = [
      path('api/vendor/products/form-data/', views_vendor_api.api_product_form_data, name='vendor_api_product_form_data'),
      path('api/vendor/products/<int:pk>/', views_vendor_api.api_product_edit, name='vendor_api_product_edit'),
      path('api/vendor/masters/<str:kind>/', views_vendor_api.api_create_master, name='vendor_api_create_master'),
+     # ---- Phase V10: stock & inventory tools ----
+     path('api/vendor/stock/', views_vendor_api.api_stock, name='vendor_api_stock'),
+     path('api/vendor/stock/adjust/', views_vendor_api.api_stock_adjust, name='vendor_api_stock_adjust'),
+     path('api/vendor/stock/threshold/', views_vendor_api.api_stock_threshold, name='vendor_api_stock_threshold'),
+     path('api/vendor/stock/history/', views_vendor_api.api_stock_history, name='vendor_api_stock_history'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

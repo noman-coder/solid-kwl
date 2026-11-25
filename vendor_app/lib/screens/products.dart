@@ -13,6 +13,7 @@ import '../widgets/empty_state.dart';
 import '../widgets/notice_card.dart';
 import '../widgets/skeleton.dart';
 import 'product_form.dart';
+import 'stock.dart';
 
 /// Products tab: search + filter chips (Sab / Approved / Pending / Rejected / Kam stock / Khatam), list ya grid,
 /// har product par shop show/hide switch, card par tap = quick edit (rate, discount, naya stock).
@@ -262,6 +263,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     fillColor: kBg,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
                   ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Stock (kam / khatam)',
+                onPressed: () => openStockScreen(context),
+                icon: Badge(
+                  isLabelVisible: ((st.productCounts?['low'] ?? 0) + (st.productCounts?['out'] ?? 0)) > 0,
+                  label: Text('${(st.productCounts?['low'] ?? 0) + (st.productCounts?['out'] ?? 0)}'),
+                  child: const Icon(Icons.inventory_rounded),
                 ),
               ),
               IconButton(

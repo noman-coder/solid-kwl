@@ -12,7 +12,7 @@ import 'api.dart';
 
 /// Notification se aaya "kahan kholna hai" (server `vendor_push.py` ka data).
 ///
-/// `type`: new_order | order_cancelled | rider_cash | review | low_stock | out_of_stock | test
+/// `type`: new_order | order_cancelled | rider_cash | review | low_stock | out_of_stock | stock_summary | test
 class PushTarget {
   final String type;
   final int orderId; // 0 = is notification ka order nahi
@@ -45,7 +45,7 @@ class PushTarget {
   bool get hasOrder =>
       orderId > 0 && (type == 'new_order' || type == 'order_cancelled' || type == 'review');
 
-  bool get isStock => type == 'low_stock' || type == 'out_of_stock';
+  bool get isStock => type == 'low_stock' || type == 'out_of_stock' || type == 'stock_summary';
 }
 
 /// Push notification (Firebase Cloud Messaging) - Phase V7.

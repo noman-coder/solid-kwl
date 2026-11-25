@@ -9,6 +9,7 @@ import '../models/dashboard.dart';
 import '../models/order_detail.dart';
 import '../models/orders.dart';
 import '../models/products.dart';
+import '../models/stock.dart';
 import '../models/vendor.dart';
 import '../utils.dart';
 
@@ -351,6 +352,42 @@ class Api {
       first['product'] is Map ? VendorProduct.fromJson(asMap(first['product'])) : null,
       countsFrom(d['counts']),
     );
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V10: Stock & inventory
+  // ------------------------------------------------------------------
+
+  /// Stock ki list. [filter]: need (kam + khatam) | low | out | all, [q]: naam / barcode.
+  static Future<StockPage> stock(String filter, {int page = 1, String q = ''}) async {
+    final params = <String, String>{'filter': filter, 'page': '$page'};
+    final query = q.trim();
+    if (query.isNotEmpty) params['q'] = query;
+    final d = await _req('GET', '/api/vendor/stock/?${Uri(queryParameters: params).query}');
+    return StockPage.fromJson(d);
+  }
+
+  /// Stock add / minus. [items]: {id, mode: add|minus, qty, reason, note?}. [requestKey] wahi dobara bhejein to
+  /// (net toot kar retry par) stock do dafa nahi badalta.
+  static Future<StockAdjustResult> adjustStock(List<Map<String, dynamic>> items, {String? requestKey}) async {
+    final d = await _req('POST', '/api/vendor/stock/adjust/', body: {
+      'items': items,
+      if (requestKey != null) 'request_key': requestKey,
+    });
+    return StockAdjustResult.fromJson(d);
+  }
+
+  /// Kam stock ki hadd (is se kam ya barabar = kam, push alert bhi isi par).
+  static Future<StockItem> setStockThreshold(int id, double threshold) async {
+    final d = await _req('POST', '/api/vendor/stock/threshold/', body: {'id': id, 'threshold': threshold});
+    return StockItem.fromJson(asMap(d['product']));
+  }
+
+  /// Stock ki tabdeeliyon ka record. [productId] na ho to poore store ka.
+  static Future<StockHistoryPage> stockHistory({int? productId, int page = 1}) async {
+    final params = <String, String>{'page': '$page', if (productId != null) 'product': '$productId'};
+    final d = await _req('GET', '/api/vendor/stock/history/?${Uri(queryParameters: params).query}');
+    return StockHistoryPage.fromJson(d);
   }
 
   // ------------------------------------------------------------------
