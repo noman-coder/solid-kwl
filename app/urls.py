@@ -1211,6 +1211,11 @@ urlpatterns = [
      path('api/vendor/stock/adjust/', views_vendor_api.api_stock_adjust, name='vendor_api_stock_adjust'),
      path('api/vendor/stock/threshold/', views_vendor_api.api_stock_threshold, name='vendor_api_stock_threshold'),
      path('api/vendor/stock/history/', views_vendor_api.api_stock_history, name='vendor_api_stock_history'),
+     # Phase V11: sales, cash & profit
+     path('api/vendor/sales/', views_vendor_api.api_sales, name='vendor_api_sales'),
+     path('api/vendor/sales/statement/', views_vendor_api.api_sales_statement, name='vendor_api_sales_statement'),
+     path('api/vendor/sales/orders/', views_vendor_api.api_sales_orders, name='vendor_api_sales_orders'),
+     path('api/vendor/sales/export/', views_vendor_api.api_sales_export, name='vendor_api_sales_export'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

@@ -179,6 +179,7 @@ class ProductFormValues {
   final int? unit;
   final double price; // discount se pehle ka rate
   final double discount;
+  final double? purchaseRate; // Phase V11: vendor ka kharid rate (khali = null)
   final double currentStock;
   final String barcode;
   final String? image;
@@ -195,6 +196,7 @@ class ProductFormValues {
     required this.unit,
     required this.price,
     required this.discount,
+    this.purchaseRate,
     required this.currentStock,
     required this.barcode,
     required this.image,
@@ -215,6 +217,7 @@ class ProductFormValues {
       unit: idOrNull(m['unit']),
       price: toD(m['price']),
       discount: toD(m['discount_percentage']),
+      purchaseRate: m['purchase_rate'] == null ? null : toD(m['purchase_rate']),
       currentStock: toD(m['current_stock']),
       barcode: s(m['barcode']),
       image: img.isEmpty ? null : img,

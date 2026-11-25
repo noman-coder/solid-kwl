@@ -4,7 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 const String kAppName = 'Vendor App';
 
 /// App ka version (pubspec.yaml ke version se milana).
-const String kAppVersion = '0.10.0 (11)';
+const String kAppVersion = '0.11.0 (12)';
 
 /// Kisi bhi value ko safe text banao (null -> '').
 String s(dynamic v) => v == null ? '' : v.toString();
@@ -67,6 +67,17 @@ String dateTimeText(String iso) {
   if (d == null) return '';
   return '${d.day} ${_months[d.month - 1]}, ${clockText(iso)}';
 }
+
+/// "2026-11-05" -> "5 Nov 2026" (sirf tareekh, time zone ka koi asar nahi). Parse na ho to khali.
+String dateText(String ymd) {
+  final d = DateTime.tryParse(ymd);
+  if (d == null) return '';
+  return '${d.day} ${_months[d.month - 1]} ${d.year}';
+}
+
+/// DateTime -> "2026-11-05" (server ko tareekh bhejne ke liye).
+String ymdOf(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 /// "5 min pehle", "2 ghante pehle", "3 din pehle" (1 din se purana ho to tareekh). Parse na ho to khali.
 String agoText(String iso) {

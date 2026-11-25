@@ -73,6 +73,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final TextEditingController _desc = TextEditingController();
   final TextEditingController _price = TextEditingController();
   final TextEditingController _discount = TextEditingController();
+  final TextEditingController _purchase = TextEditingController(); // Phase V11: kharid rate (profit ke liye, optional)
   final TextEditingController _stock = TextEditingController();
   final ScrollController _scroll = ScrollController();
 
@@ -89,6 +90,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _catErr;
   String? _priceErr;
   String? _discErr;
+  String? _purchaseErr;
   String? _stockErr;
   String? _submitErr;
   bool _saving = false;
@@ -124,6 +126,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _desc.dispose();
     _price.dispose();
     _discount.dispose();
+    _purchase.dispose();
     _stock.dispose();
     _scroll.dispose();
     super.dispose();
@@ -149,6 +152,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _unit = v.unit;
         _price.text = v.price > 0 ? _plainNum(v.price) : '';
         _discount.text = v.discount > 0 ? _plainNum(v.discount) : '';
+        final pr = v.purchaseRate;
+        _purchase.text = pr != null && pr > 0 ? _plainNum(pr) : '';
         if (widget.startAtPhotos) _step = _photoStepIndex;
       } else {
         await _restoreDraft(d);
@@ -176,6 +181,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _name.text.trim().isNotEmpty ||
       _desc.text.trim().isNotEmpty ||
       _price.text.trim().isNotEmpty ||
+      _purchase.text.trim().isNotEmpty ||
       _stock.text.trim().isNotEmpty ||
       _photo != null ||
       _category != null;
@@ -193,6 +199,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       'description': _desc.text,
       'price': _price.text,
       'discount': _discount.text,
+      'purchase_rate': _purchase.text,
       'stock': _stock.text,
       'category': _category,
       'brand': _brand,
@@ -232,6 +239,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _desc.text = s(m['description']);
       _price.text = s(m['price']);
       _discount.text = s(m['discount']);
+      _purchase.text = s(m['purchase_rate']);
       _stock.text = s(m['stock']);
       _category = exists(d.categories, cat) ? cat : null;
       _brand = exists(d.brands, brand) ? brand : null;
@@ -270,6 +278,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _desc.clear();
       _price.clear();
       _discount.clear();
+      _purchase.clear();
       _stock.clear();
       _category = null;
       _brand = null;
@@ -277,7 +286,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _step = 0;
       _draftRestored = false;
       _requestKey = _newRequestKey();
-      _nameErr = _catErr = _priceErr = _discErr = _stockErr = _submitErr = null;
+      _nameErr = _catErr = _priceErr = _discErr = _purchaseErr = _stockErr = _submitErr = null;
     });
   }
 
@@ -345,6 +354,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (disc == null || disc < 0 || disc > _lim.maxDiscount) {
       d = 'Discount 0 se ${_plainNum(_lim.maxDiscount)} ke darmiyan hona chahiye.';
     }
+    String? pu;
+    if (_purchase.text.trim().isNotEmpty) {
+      final pr = _num(_purchase);
+      if (pr == null || pr <= 0 || pr > _lim.maxPrice) pu = 'Kharid rate sahi likhein (0 se zyada) ya khali chhor dein.';
+    }
     final stock = _stock.text.trim().isEmpty ? 0.0 : _num(_stock);
     if (stock == null || stock < 0 || stock > _lim.maxStock) {
       st = 'Stock sahi number hona chahiye.';
@@ -354,9 +368,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() {
       _priceErr = p;
       _discErr = d;
+      _purchaseErr = pu;
       _stockErr = st;
     });
-    return p == null && d == null && st == null;
+    return p == null && d == null && pu == null && st == null;
   }
 
   void _toTop() {
@@ -428,6 +443,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       'unit': _unit ?? '',
       'price': _num(_price),
       'discount_percentage': disc,
+      // Phase V11: khali bhejne par (edit mein) kharid rate hat jata hai; naye product mein khali = nahi dena
+      'purchase_rate': _purchase.text.trim(),
       'stock': stock,
     };
     final photoFile = _photo;
@@ -861,6 +878,23 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         decoration: InputDecoration(
             labelText: 'Discount (0 - ${_plainNum(_lim.maxDiscount)})', hintText: '0', suffixText: '%', errorText: _discErr),
       ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _purchase,
+        keyboardType: kb,
+        inputFormatters: [nf],
+        onChanged: (_) {
+          if (_purchaseErr != null) _purchaseErr = null;
+          _changed();
+        },
+        decoration: InputDecoration(
+          labelText: 'Kharid rate (optional)',
+          prefixText: 'Rs ',
+          helperText: 'Profit hisaab ke liye. Customer ko nahi dikhta.',
+          helperMaxLines: 2,
+          errorText: _purchaseErr,
+        ),
+      ),
       if (customer != null)
         Container(
           margin: const EdgeInsets.only(top: 12),
@@ -1055,6 +1089,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         rows: [
           ('Rate', _num(_price) == null ? '-' : rs(_num(_price)!)),
           ('Discount', disc > 0 ? '${_plainNum(disc)}%' : 'Nahi'),
+          if (_num(_purchase) != null) ('Kharid rate', rs(_num(_purchase)!)),
           if (customer != null) ('Customer ko rate', rs(double.parse(customer.toStringAsFixed(2)))),
           if (share != null) ('Aap ko milega', rs(double.parse(share.toStringAsFixed(2)))),
           (_editing ? 'Naya stock' : 'Stock', '${numText(stock)}${unit.isEmpty ? '' : ' $unit'}'),

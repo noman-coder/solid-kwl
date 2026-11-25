@@ -56,8 +56,11 @@ def _period(request):
     return key, days, start_date, today, start
 
 
-def _analytics_data(vendor, profile, start_date, today, start):
+def _analytics_data(vendor, profile, start_date, today, start, end=None):
+    """`end` (optional, exclusive datetime): custom date range ke liye (vendor app V11). Web `end` nahi deta, to wahi purana rawayya."""
     orders = SaleOrder.objects.filter(vendor=vendor, order_date__gte=start)
+    if end is not None:
+        orders = orders.filter(order_date__lt=end)
     live_orders = orders.exclude(status='cancelled')
     items = SaleOrderItem.objects.filter(order__in=live_orders)
 

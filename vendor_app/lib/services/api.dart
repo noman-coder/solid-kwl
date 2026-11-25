@@ -9,6 +9,7 @@ import '../models/dashboard.dart';
 import '../models/order_detail.dart';
 import '../models/orders.dart';
 import '../models/products.dart';
+import '../models/sales.dart';
 import '../models/stock.dart';
 import '../models/vendor.dart';
 import '../utils.dart';
@@ -76,6 +77,7 @@ class Api {
   }
 
   static const String _dashKey = 'vendor_dash_cache';
+  static const String _salesKeyPrefix = 'vendor_sales_cache_';
 
   static Future<void> _save() async {
     final p = await SharedPreferences.getInstance();
@@ -231,6 +233,9 @@ class Api {
     try {
       final p = await SharedPreferences.getInstance();
       await p.remove(_dashKey);
+      for (final k in kSalesPeriods) {
+        await p.remove('$_salesKeyPrefix$k'); // Phase V11: sales ka purana data bhi (doosra vendor login kare to)
+      }
     } catch (_) {}
   }
 
@@ -352,6 +357,86 @@ class Api {
       first['product'] is Map ? VendorProduct.fromJson(asMap(first['product'])) : null,
       countsFrom(d['counts']),
     );
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V11: Sales, cash & profit
+  // ------------------------------------------------------------------
+
+  static String _q(Map<String, String> params) => Uri(queryParameters: params).query;
+
+  /// Sales summary. Kamyab jawab (custom ke ilawa) phone mein save hota hai - net na ho to purana data dikhane ke liye.
+  static Future<SalesData> sales(SalesRange r) async {
+    final d = await _req('GET', '/api/vendor/sales/?${_q(r.params)}');
+    final data = SalesData.fromJson(d);
+    if (!r.isCustom) {
+      try {
+        final p = await SharedPreferences.getInstance();
+        await p.setString('$_salesKeyPrefix${r.period}', jsonEncode(d));
+      } catch (_) {}
+    }
+    return data;
+  }
+
+  /// Phone mein save kiya hua aakhri sales data (na ho / kharab ho / custom ho to null).
+  static Future<SalesData?> cachedSales(SalesRange r) async {
+    if (r.isCustom) return null;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString('$_salesKeyPrefix${r.period}');
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? SalesData.fromJson(Map<String, dynamic>.from(decoded)) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Din wise kamayi (sirf mukammal orders).
+  static Future<StatementData> salesStatement(SalesRange r) async {
+    final d = await _req('GET', '/api/vendor/sales/statement/?${_q(r.params)}');
+    return StatementData.fromJson(d);
+  }
+
+  /// Sales ke number par tap: us hisaab ke orders. [group]: sales | all | done | open | cancelled,
+  /// [day]: YYYY-MM-DD, [payment]: cod | online.
+  static Future<OrdersPage> salesOrders(SalesRange r,
+      {String group = 'sales', String? day, String? payment, int page = 1}) async {
+    final params = <String, String>{
+      ...r.params,
+      'group': group,
+      'page': '$page',
+      if (day != null && day.isNotEmpty) 'day': day,
+      if (payment != null && payment.isNotEmpty) 'payment': payment,
+    };
+    final d = await _req('GET', '/api/vendor/sales/orders/?${_q(params)}');
+    return OrdersPage.fromJson(d);
+  }
+
+  /// Sales report file (CSV / PDF) - share sheet ke liye.
+  static Future<ExportFile> salesExport(SalesRange r, {String format = 'csv'}) async {
+    final fmt = format == 'pdf' ? 'pdf' : 'csv';
+    final headers = <String, String>{
+      'Accept': '*/*',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+    http.Response resp;
+    try {
+      resp = await http
+          .get(_u('/api/vendor/sales/export/?${_q({...r.params, 'format': fmt})}'), headers: headers)
+          .timeout(const Duration(seconds: 60));
+    } catch (_) {
+      throw ApiException('Internet ya server se rabta nahi ho raha', 0, code: 'network');
+    }
+    if (resp.statusCode >= 400) {
+      _decode(resp); // ApiException phenkta hai
+      throw ApiException('Report nahi ban saki (${resp.statusCode}). Dobara koshish karein.', resp.statusCode);
+    }
+    var name = 'sales.$fmt';
+    final cd = resp.headers['content-disposition'] ?? '';
+    final m = RegExp(r'filename="?([^";]+)"?').firstMatch(cd);
+    if (m != null && m.group(1)!.trim().isNotEmpty) name = m.group(1)!.trim();
+    return ExportFile(resp.bodyBytes, name, fmt == 'pdf' ? 'application/pdf' : 'text/csv');
   }
 
   // ------------------------------------------------------------------

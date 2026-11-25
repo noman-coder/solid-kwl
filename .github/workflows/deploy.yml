@@ -3,6 +3,7 @@ name: Django CI/CD Pipeline
 # DB design: MySQL runs ONLY on the GitHub runner (service container).
 # Persistence = encrypted snapshots on Google Drive (rclone, folder "hassan_shops").
 #   start of run : restore latest snapshot -> local MySQL (first ever run: fresh DB)
+#   every 30 min : snapshot -> Drive
 #   end of run   : stop server, final snapshot -> Drive, keep latest 10
 # No Aiven / cloud MySQL anywhere.
 
@@ -199,7 +200,7 @@ jobs:
 
           cat > "$RUNNER_TEMP/snapshot.sh" <<'SHEOF'
           #!/usr/bin/env bash
-          MODE="${1:-final}"
+          MODE="${1:-periodic}"
           cd "$GITHUB_WORKSPACE"
           exec 9>"$HELPER_DIR/snapshot.lock"
           flock 9
@@ -532,12 +533,13 @@ jobs:
           pkill -f "gunicorn" || true
           pkill -f "manage.py runserver" || true
           pkill -f "cloudflared" || true
+          pkill -f "periodic_snapshot" || true
           sleep 2
 
       - name: Start Gunicorn, Health Check & Auto-Restarting Cloudflare Tunnel
         if: env.STOP_AFTER_MIGRATE != 'true'
         run: |
-          touch gunicorn.log tunnel.log
+          touch gunicorn.log tunnel.log periodic_snapshot.log
 
           setsid nohup gunicorn P1.wsgi:application \
             --bind 127.0.0.1:8000 \
@@ -575,6 +577,13 @@ jobs:
               sleep 3
             done
           ' > /dev/null 2>&1 < /dev/null &
+
+          setsid nohup bash -c '
+            while true; do
+              sleep 1800
+              bash "$HELPER_DIR/snapshot.sh" periodic
+            done
+          ' >> periodic_snapshot.log 2>&1 < /dev/null &
 
           sleep 4
           echo "=== GUNICORN & AUTO-RESTARTING CLOUDFLARE TUNNEL LIVE ==="
@@ -623,6 +632,7 @@ jobs:
           pkill -f "cloudflared" || true
           pkill -f "gunicorn" || true
           pkill -f "manage.py runserver" || true
+          pkill -f "periodic_snapshot" || true
           pkill -f "snapshot.sh" || true
           sleep 3
           bash "$HELPER_DIR/snapshot.sh" final

@@ -13,6 +13,9 @@ Phase V9-A: product add/edit - form-data (category/brand/unit list + limits + ed
           Validation web wali `_clean_product_form` / `_validate_image` hi hai. Photo optional hai (V9-B: app camera/gallery se bhejti hai).
 Phase V10: stock tools - stock list (kam / khatam), stock adjust (add / minus + wajah, bulk), per-product threshold, stock history.
           Stock add/minus ki logic `vendor_stock.py` (add: `_add_stock`, minus: FIFO); history `VendorStockLog` (migration 0062).
+Phase V11: sales tab - sales (summary, COD/online, profit, chart, top/slow), statement (din wise), orders (drill-down),
+          export (CSV / PDF). Numbers web ke `_analytics_data` se; profit ke liye Product.purchase_rate (migration 0063,
+          khali ho to profit 'N/A'). Add/edit product ab optional `purchase_rate` bhi leta hai.
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -26,6 +29,8 @@ Usool:
 - Unapproved vendor sirf login + status (me) dekh sakta hai. Baqi sab API `@vendor_api([...])` se
   approved vendor ke liye hain (approval_required=True default).
 """
+import csv
+import io
 import json
 import logging
 import re
@@ -39,8 +44,8 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Case, Count, F, FloatField, OuterRef, Q, Subquery, Sum, Value, When
-from django.db.models.functions import Coalesce
-from django.http import JsonResponse
+from django.db.models.functions import Coalesce, TruncDate
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.timezone import now
@@ -58,7 +63,8 @@ from .views_vendor_portal import (
     _apply_product_edit, _auto_approve_products, _clean_product_form, _err_text, _login_key, _save_new_product,
     _stock_warehouse, create_master_entry,
 )
-from .views_vendor_tools import LOW_STOCK_DEFAULT, _analytics_data, _stock_rows, quick_update_product
+from .views_vendor_tools import (DONE_STATUSES, LOW_STOCK_DEFAULT, OPEN_STATUSES, _analytics_data, _csv_safe, _stock_rows,
+                                 quick_update_product)
 
 logger = logging.getLogger(__name__)
 
@@ -1187,6 +1193,27 @@ def _form_post(d, product=None):
     return out
 
 
+def _parse_purchase_rate(d):
+    """Optional `purchase_rate` (vendor ka kharid rate). Returns (given, value, error).
+
+    given=False -> key bheji hi nahi (kuch na badlo). Khali string/None -> value None (rate hata do).
+    Warna 0 se bara aur MAX_PRICE tak.
+    """
+    if 'purchase_rate' not in d:
+        return False, None, None
+    raw = _raw(d.get('purchase_rate'))
+    if raw == '':
+        return True, None, None
+    try:
+        v = Decimal(raw)
+        if v <= 0 or v > MAX_PRICE:
+            raise ArithmeticError
+        return True, v.quantize(Decimal('0.01')), None
+    except Exception:
+        return True, None, 'Purchase rate sahi likhein (0 se zyada) ya khali chhor dein'
+
+
+
 def _named(qs):
     return [{'id': o.pk, 'name': o.name} for o in qs.only('id', 'name').order_by('name')]
 
@@ -1207,6 +1234,7 @@ def _form_product_json(p, profile):
         'discount_percentage': _money(p.discount_percentage),
         'current_stock': _qty(inv.stock if inv else 0),
         'barcode': p.barcode or '',
+        'purchase_rate': _money(p.purchase_rate) if p.purchase_rate is not None else None,
         'image': _media_url(p.image),
         'has_image': bool(p.image),
         'approval_status': p.approval_status,
@@ -1233,7 +1261,7 @@ def api_product_form_data(request, profile):
         'can_add': bool(_stock_warehouse()),
         'limits': {
             'name_min': NAME_MIN, 'name_max': NAME_MAX, 'description_max': DESC_MAX,
-            'max_price': float(MAX_PRICE), 'max_discount': MAX_DISCOUNT, 'max_stock': MAX_STOCK,
+            'max_price': float(MAX_PRICE), 'purchase_rate_optional': True, 'max_discount': MAX_DISCOUNT, 'max_stock': MAX_STOCK,
             'max_image_mb': MAX_IMAGE_BYTES // (1024 * 1024), 'master_name_min': 2, 'master_name_max': 100,
         },
     }
@@ -1285,6 +1313,9 @@ def _product_create(request, profile):
     try:
         data, errors = _clean_product_form(request, editing=False, post=_form_post(d), files=request.FILES,
                                            require_image=False)
+        pr_given, pr_value, pr_err = _parse_purchase_rate(d)
+        if pr_err:
+            errors = list(errors) + [pr_err]
         if errors:
             return _validation_err(errors)
         no_photo = data['image'] is None
@@ -1310,6 +1341,8 @@ def _product_create(request, profile):
                     logger.exception('Vendor API product add retry (without photo) error')
             if product is None:
                 return _err('Product save nahi ho saka, dobara koshish karein.', 500, code='server')
+        if pr_given and pr_value is not None:
+            Product.objects.filter(pk=product.pk, vendor=vendor).update(purchase_rate=pr_value)
         if done_key:
             cache.set(done_key, product.pk, 600)
     finally:
@@ -1368,6 +1401,9 @@ def api_product_edit(request, profile, pk):
     try:
         data, errors = _clean_product_form(request, editing=True, post=_form_post(d, product), files=request.FILES,
                                            require_image=False)
+        pr_given, pr_value, pr_err = _parse_purchase_rate(d)
+        if pr_err:
+            errors = list(errors) + [pr_err]
         if errors:
             return _validation_err(errors)
         had_photo = bool(product.image)
@@ -1378,6 +1414,8 @@ def api_product_edit(request, profile, pk):
                 if locked is None:
                     return _err('Ye product nahi mila.', 404, code='not_found')
                 resubmitted = _apply_product_edit(profile, locked, data, _stock_warehouse())
+                if pr_given:
+                    Product.objects.filter(pk=locked.pk, vendor=vendor).update(purchase_rate=pr_value)
         except ValidationError as exc:
             return _validation_err([_err_text(exc)])
         except Exception:
@@ -1650,3 +1688,362 @@ def api_stock_history(request, profile):
             'source': r.source, 'at': _iso(r.created_at),
         } for r in rows],
     })
+
+
+# ================================================================ Phase V11: Sales, cash & profit
+#
+# Numbers web `vendor_analytics` (`_analytics_data`) se aate hain: sale = cancelled ke baghair orders ke items ka total,
+# commission = sale - (sale x (100-%)/100). Statement sirf mukammal (delivered/invoiced) orders ka hai.
+
+SALES_PERIODS = {'today': ('Aaj', 1), 'week': ('7 din', 7), 'month': ('30 din', 30)}
+SALES_MAX_DAYS = 366
+SALES_DRILL_GROUPS = ('sales', 'all', 'done', 'open', 'cancelled')
+SALES_EXPORT_MAX_ROWS = 5000
+SALES_SLOW_ITEMS = 5
+_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _parse_date(raw):
+    raw = (raw or '').strip()
+    if not _DATE_RE.match(raw):
+        return None
+    try:
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _sales_range(request):
+    """?period=today|week|month|custom&from=YYYY-MM-DD&to=YYYY-MM-DD -> (range dict, None) ya (None, error response).
+
+    Ghalat/khali period -> 'week'. custom mein aaj se aagay ki tareekh aaj par ruk jati hai; zyada se zyada 366 din.
+    `end` exclusive hai (aakhri din ke agle din ka 00:00).
+    """
+    key = (request.GET.get('period') or 'week').strip().lower()
+    today = timezone.localdate()
+    if key == 'custom':
+        f = _parse_date(request.GET.get('from'))
+        t = _parse_date(request.GET.get('to'))
+        if not f or not t:
+            return None, _err('Shuru aur aakhri tareekh sahi likhein (YYYY-MM-DD).', 400, code='validation')
+        if t > today:
+            t = today
+        if f > t:
+            return None, _err('Shuru ki tareekh aakhri tareekh se pehle honi chahiye.', 400, code='validation')
+        if (t - f).days + 1 > SALES_MAX_DAYS:
+            return None, _err('Zyada se zyada 1 saal (366 din) ka hisaab ek baar mein dekh sakte hain.', 400,
+                              code='validation')
+        label = 'Chuni hui muddat'
+    else:
+        if key not in SALES_PERIODS:
+            key = 'week'
+        label, days = SALES_PERIODS[key]
+        f, t = today - timedelta(days=days - 1), today
+    start = timezone.make_aware(datetime.combine(f, dtime.min))
+    end = timezone.make_aware(datetime.combine(t + timedelta(days=1), dtime.min))
+    return {'key': key, 'label': label, 'from': f, 'to': t, 'start': start, 'end': end,
+            'days': (t - f).days + 1, 'today': today}, None
+
+
+def _period_json(r):
+    return {'key': r['key'], 'label': r['label'], 'from': r['from'].isoformat(), 'to': r['to'].isoformat(),
+            'days': r['days']}
+
+
+def _pay_group(method):
+    """'cod' ya 'online' (_order_json wala usool: khali ya cod -> COD, baqi sab online)."""
+    return 'cod' if (method or 'cod').strip().lower() in ('', 'cod') else 'online'
+
+
+def _q2(v):
+    return Decimal(v or 0).quantize(CENT, ROUND_HALF_UP)
+
+
+def _share_json(sales, pct):
+    """sale -> {sales, commission, net} (commission % ke hisab se, 2 decimal)."""
+    sales = _q2(sales)
+    commission = _q2(sales * Decimal(pct) / HUNDRED)
+    return {'sales': _money(sales), 'commission': _money(commission), 'net': _money(sales - commission)}
+
+
+def _profit_json(vendor, items, pct):
+    """Profit sirf un items par jin ke product par purchase_rate bhara ho. Koi na ho to available=False (app 'N/A').
+
+    gross = sale - (qty x purchase_rate); commission = us sale par commission %; net = gross - commission.
+    """
+    cost = covered_sales = Decimal('0')
+    covered = 0
+    rows = (items.filter(product__purchase_rate__isnull=False)
+            .values_list('qty', 'total_amt', 'product__purchase_rate').iterator())
+    for qty, total, rate in rows:
+        covered += 1
+        covered_sales += Decimal(total or 0)
+        cost += Decimal(str(qty or 0)) * Decimal(rate)
+    prods = Product.objects.filter(vendor=vendor, approval_status='approved')
+    base = {'products_total': prods.count(),
+            'products_with_rate': prods.filter(purchase_rate__isnull=False).count(),
+            'items_covered': covered}
+    if covered == 0:
+        return dict(base, available=False, covered_sales=None, cost=None, gross=None, commission=None,
+                    net=None, margin_percent=None)
+    covered_sales, cost = _q2(covered_sales), _q2(cost)
+    gross = covered_sales - cost
+    commission = _q2(covered_sales * Decimal(pct) / HUNDRED)
+    net = gross - commission
+    margin = round(float(net * HUNDRED / covered_sales), 1) if covered_sales else None
+    return dict(base, available=True, covered_sales=_money(covered_sales), cost=_money(cost), gross=_money(gross),
+                commission=_money(commission), net=_money(net), margin_percent=margin)
+
+
+def _slow_products(vendor, sold):
+    """Approved + active products jo kam bike (0 bikri walay pehle). sold = {product_id: qty}."""
+    rows = list(Product.objects.filter(vendor=vendor, approval_status='approved', is_active=True)
+                .order_by().values_list('id', 'name'))
+    rows.sort(key=lambda r: (float(sold.get(r[0]) or 0), r[1].lower()))
+    return [{'product_id': pid, 'name': name, 'qty': _qty(sold.get(pid) or 0)}
+            for pid, name in rows[:SALES_SLOW_ITEMS]]
+
+
+@vendor_api(['GET'])
+def api_sales(request, profile):
+    """GET /api/vendor/sales/?period=today|week|month|custom&from=&to=
+
+    Summary (sale, orders, avg, commission, net), COD vs Online, profit (purchase rate wale products par),
+    din wise chart, top 10 aur kam chalne wale products. Sirf is vendor ka data.
+    """
+    r, bad = _sales_range(request)
+    if bad:
+        return bad
+    vendor = profile.vendor
+    data = _analytics_data(vendor, profile, r['from'], r['to'], r['start'], end=r['end'])
+    pct = commission_percent(profile)
+    sales = data['sales']
+    commission = _q2(sales - data['est_share'])
+
+    live = (SaleOrder.objects.filter(vendor=vendor, order_date__gte=r['start'], order_date__lt=r['end'])
+            .exclude(status='cancelled'))
+    items = SaleOrderItem.objects.filter(order__in=live)
+
+    pay = {'cod': {'orders': 0, 'sales': Decimal('0')}, 'online': {'orders': 0, 'sales': Decimal('0')}}
+    for row in (items.order_by().values('order__payment_method')
+                .annotate(total=Sum('total_amt'), n=Count('order', distinct=True))):
+        g = pay[_pay_group(row['order__payment_method'])]
+        g['orders'] += row['n']
+        g['sales'] += Decimal(row['total'] or 0)
+    payments = {k: dict(_share_json(v['sales'], pct), orders=v['orders']) for k, v in pay.items()}
+
+    sold = dict(items.order_by().values_list('product_id').annotate(q=Sum('qty')))
+    top = [{'product_id': t['product_id'], 'name': t['product__name'] or '', 'qty': _qty(t['qty']),
+            'sales': _money(t['total']), 'pct': t['pct']} for t in data['top']]
+
+    return JsonResponse({
+        'ok': True,
+        'generated_at': now().isoformat(),
+        'period': _period_json(r),
+        'commission_percent': _money(pct),
+        'summary': {
+            'orders': data['total_orders'], 'done': data['done'], 'open': data['open_orders'],
+            'cancelled': data['cancelled'], 'cancel_rate': data['cancel_rate'],
+            'sales': _money(sales), 'units': _qty(data['units']), 'avg_order': _money(data['avg_order']),
+            'commission': _money(commission), 'net': _money(data['est_share']),
+        },
+        'payments': payments,
+        'profit': _profit_json(vendor, items, pct),
+        'chart': [{'date': d['date'].isoformat(), 'label': d['date'].strftime('%d %b'),
+                   'sales': _money(d['total']), 'orders': d['orders']} for d in data['days']],
+        'top': top,
+        'slow': _slow_products(vendor, sold),
+        'lifetime': _lifetime_json(vendor),
+    })
+
+
+def _lifetime_json(vendor):
+    e = vendor_earnings(vendor)
+    return {'units': _qty(e['units']), 'sales': _money(e['sales']), 'commission': _money(e['commission']),
+            'payable': _money(e['payable'])}
+
+
+@vendor_api(['GET'])
+def api_sales_statement(request, profile):
+    """GET /api/vendor/sales/statement/?period=...  Din wise kamayi (sirf mukammal orders: delivered/invoiced).
+
+    Har din: orders, sale, commission, vendor ko milne wali raqam. Naya din pehle. `lifetime` = ab tak ka poora hisaab.
+    """
+    r, bad = _sales_range(request)
+    if bad:
+        return bad
+    vendor = profile.vendor
+    pct = commission_percent(profile)
+    items = SaleOrderItem.objects.filter(order__vendor=vendor, order__status__in=DONE_STATUSES,
+                                         order__order_date__gte=r['start'], order__order_date__lt=r['end'])
+    rows = (items.annotate(d=TruncDate('order__order_date')).order_by().values('d')
+            .annotate(total=Sum('total_amt'), n=Count('order', distinct=True)))
+    days = []
+    tot_sales = Decimal('0')
+    tot_orders = 0
+    for row in sorted(rows, key=lambda x: x['d'], reverse=True):
+        tot_sales += Decimal(row['total'] or 0)
+        tot_orders += row['n']
+        days.append(dict(_share_json(row['total'], pct), date=row['d'].isoformat(), orders=row['n']))
+    return JsonResponse({
+        'ok': True,
+        'generated_at': now().isoformat(),
+        'period': _period_json(r),
+        'commission_percent': _money(pct),
+        'note': 'Sirf mukammal (delivered) orders. Commission/net commission % ke hisab se.',
+        'total': dict(_share_json(tot_sales, pct), orders=tot_orders),
+        'days': days,
+        'lifetime': _lifetime_json(vendor),
+    })
+
+
+@vendor_api(['GET'])
+def api_sales_orders(request, profile):
+    """GET /api/vendor/sales/orders/?period=...&group=sales|all|done|open|cancelled&day=YYYY-MM-DD&payment=cod|online&page=
+
+    Sales ke number par tap karne par us hisaab ke orders (drill-down). Order ka JSON `orders` list wala hi hai.
+    group: sales (cancelled ke baghair - sale wala hisaab, default), all, done, open, cancelled.
+    """
+    r, bad = _sales_range(request)
+    if bad:
+        return bad
+    vendor = profile.vendor
+    group = (request.GET.get('group') or 'sales').strip().lower()
+    if group not in SALES_DRILL_GROUPS:
+        group = 'sales'
+    qs = SaleOrder.objects.filter(vendor=vendor, order_date__gte=r['start'], order_date__lt=r['end'])
+    if group == 'sales':
+        qs = qs.exclude(status='cancelled')
+    elif group == 'done':
+        qs = qs.filter(status__in=DONE_STATUSES)
+    elif group == 'open':
+        qs = qs.filter(status__in=OPEN_STATUSES)
+    elif group == 'cancelled':
+        qs = qs.filter(status='cancelled')
+
+    raw_day = (request.GET.get('day') or '').strip()
+    day = None
+    if raw_day:
+        day = _parse_date(raw_day)
+        if not day:
+            return _err('Din ki tareekh sahi likhein (YYYY-MM-DD).', 400, code='validation')
+        d0 = timezone.make_aware(datetime.combine(day, dtime.min))
+        qs = qs.filter(order_date__gte=d0, order_date__lt=d0 + timedelta(days=1))
+
+    payment = (request.GET.get('payment') or '').strip().lower()
+    cod_q = Q(payment_method__iexact='cod') | Q(payment_method='')
+    if payment == 'cod':
+        qs = qs.filter(cod_q)
+    elif payment == 'online':
+        qs = qs.exclude(cod_q)
+    else:
+        payment = ''
+
+    page = _parse_page(request.GET.get('page'))
+    total = qs.count()
+    qs = (qs.select_related('customer', 'delivery_info__rider').prefetch_related('items__product')
+          .order_by('-order_date', '-pk'))
+    start = (page - 1) * ORDERS_PAGE_SIZE
+    rows = list(qs[start:start + ORDERS_PAGE_SIZE + 1])
+    has_more = len(rows) > ORDERS_PAGE_SIZE
+    rows = rows[:ORDERS_PAGE_SIZE]
+    return JsonResponse({
+        'ok': True, 'period': _period_json(r), 'group': group, 'day': day.isoformat() if day else '',
+        'payment': payment, 'page': page, 'has_more': has_more, 'count': total,
+        'orders': [_order_json(o) for o in rows],
+    })
+
+
+def _export_rows(vendor, r, pct):
+    """Export ke liye (order, items_total, commission, net) - cancelled order par commission/net 0."""
+    qs = (SaleOrder.objects.filter(vendor=vendor, order_date__gte=r['start'], order_date__lt=r['end'])
+          .select_related('customer').prefetch_related('items').order_by('-order_date', '-pk'))
+    out = []
+    for o in qs[:SALES_EXPORT_MAX_ROWS]:
+        items = list(o.items.all())
+        total = _q2(sum((i.total_amt for i in items), Decimal('0')))
+        if o.status == 'cancelled':
+            comm = net = Decimal('0.00')
+        else:
+            comm = _q2(total * pct / HUNDRED)
+            net = total - comm
+        out.append((o, len(items), total, comm, net))
+    return out
+
+
+@vendor_api(['GET'])
+def api_sales_export(request, profile):
+    """GET /api/vendor/sales/export/?period=...&format=csv|pdf  -> file (app se share: WhatsApp / email).
+
+    CSV: web export jaisi (+ payment, commission, net). PDF: summary + orders ki list (max 5000 orders).
+    """
+    r, bad = _sales_range(request)
+    if bad:
+        return bad
+    vendor = profile.vendor
+    pct = commission_percent(profile)
+    fmt = (request.GET.get('format') or 'csv').strip().lower()
+    rows = _export_rows(vendor, r, pct)
+    name = f"sales_{r['from']}_{r['to']}"
+
+    if fmt == 'pdf':
+        try:
+            body = _sales_pdf(profile, r, pct, rows)
+        except Exception:
+            logger.exception('Vendor sales pdf error')
+            return _err('PDF nahi ban saki, CSV try karein.', 500, code='server')
+        resp = HttpResponse(body, content_type='application/pdf')
+        resp['Content-Disposition'] = f'attachment; filename="{name}.pdf"'
+        return resp
+
+    resp = HttpResponse(content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = f'attachment; filename="{name}.csv"'
+    resp.write('\ufeff')            # Excel mein UTF-8 theek khule
+    w = csv.writer(resp)
+    w.writerow(['Order No', 'Date', 'Customer', 'Status', 'Payment', 'Items', 'Total (Rs.)',
+                'Commission (Rs.)', 'Net (Rs.)'])
+    for o, n, total, comm, net in rows:
+        w.writerow([_csv_safe(o.order_no), timezone.localtime(o.order_date).strftime('%Y-%m-%d %H:%M'),
+                    _csv_safe(o.customer.name), o.get_status_display(),
+                    'COD' if _pay_group(o.payment_method) == 'cod' else 'Online', n,
+                    f'{total:.2f}', f'{comm:.2f}', f'{net:.2f}'])
+    return resp
+
+
+def _sales_pdf(profile, r, pct, rows):
+    """Chhota PDF (reportlab, requirements mein pehle se). Sirf English/ASCII text (default font)."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    def safe(t):
+        return (str(t or '').encode('latin-1', 'replace').decode('latin-1')
+                .replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
+
+    live = [x for x in rows if x[0].status != 'cancelled']
+    sales = sum((x[2] for x in live), Decimal('0'))
+    comm = sum((x[3] for x in live), Decimal('0'))
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=28, rightMargin=28, topMargin=28, bottomMargin=28)
+    st = getSampleStyleSheet()
+    els = [Paragraph(safe(f'Sales Report - {profile.business_name or "Store"}'), st['Title']),
+           Paragraph(f"{r['from']}  to  {r['to']}", st['Normal']), Spacer(1, 10)]
+    summary = [['Orders (live)', str(len(live))], ['Sales (Rs.)', f'{sales:,.2f}'],
+               [f'Commission {pct}% (Rs.)', f'{comm:,.2f}'], ['Net earning (Rs.)', f'{sales - comm:,.2f}']]
+    t = Table(summary, colWidths=[200, 120])
+    t.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.4, colors.grey), ('ALIGN', (1, 0), (1, -1), 'RIGHT')]))
+    els += [t, Spacer(1, 14)]
+    data = [['Order', 'Date', 'Customer', 'Status', 'Pay', 'Total', 'Net']]
+    for o, n, total, c, net in rows:
+        data.append([safe(o.order_no), timezone.localtime(o.order_date).strftime('%d-%m-%y %H:%M'),
+                     safe((o.customer.name or '')[:18]), safe(o.get_status_display()),
+                     'COD' if _pay_group(o.payment_method) == 'cod' else 'Online', f'{total:,.0f}', f'{net:,.0f}'])
+    t = Table(data, repeatRows=1)
+    t.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0F766E')),
+                           ('TEXTCOLOR', (0, 0), (-1, 0), colors.white), ('FONTSIZE', (0, 0), (-1, -1), 8),
+                           ('GRID', (0, 0), (-1, -1), 0.3, colors.lightgrey),
+                           ('ALIGN', (5, 0), (-1, -1), 'RIGHT')]))
+    els.append(t)
+    doc.build(els)
+    return buf.getvalue()

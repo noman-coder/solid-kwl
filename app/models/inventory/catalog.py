@@ -167,6 +167,12 @@ class Product(models.Model):
         help_text="Vendor ke products pending se shuru hote hain; approve hone par shop par nazar aate hain"
     )
     rejection_reason = models.CharField(max_length=200, blank=True, default='')
+    # Vendor app (Phase V11): vendor ka apna kharid rate (profit hisaab ke liye). Khali (NULL) = profit 'N/A'.
+    purchase_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        verbose_name=_("Purchase Rate"),
+        help_text="Vendor ka kharid rate (sirf profit hisaab ke liye; customer ko nahi dikhta)"
+    )
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)

@@ -1,7 +1,7 @@
 name: kconn_vendor
 description: Khanewal Connect Vendor app (store owner ke liye)
 publish_to: 'none'
-version: 0.10.0+11
+version: 0.11.0+12
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -26,6 +26,8 @@ dependencies:
   image_picker: ^1.1.2
   image_cropper: ^8.0.2
   flutter_image_compress: ^2.3.0
+  # Phase V11: sales report (CSV / PDF) WhatsApp / email par share
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_lints: ^4.0.0
