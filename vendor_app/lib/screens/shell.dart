@@ -1,13 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api.dart';
 import '../services/app_state.dart';
+import '../services/push.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/in_app_banner.dart';
 import '../widgets/skeleton.dart';
 import 'dashboard.dart';
 import 'more.dart';
+import 'notification_permission.dart';
+import 'order_detail.dart';
 import 'orders.dart';
 import 'pending.dart';
 import 'placeholder_tab.dart';
@@ -15,6 +21,7 @@ import 'placeholder_tab.dart';
 /// Login ke baad ka main screen: 5 tabs (Dashboard, Orders, Products, Sales, More).
 /// Approval baqi ho to sirf PendingScreen. Dashboard (V4) aur Orders (V5) tabs bhar chuke hain; baqi tabs
 /// "jald aa raha hai" hain - aglay phases mein bharte jayenge.
+/// Phase V7: push (token register, banner, notification tap -> order detail) yahin se judta hai.
 class VendorShell extends StatefulWidget {
   final LoginResult? initial;
   final Future<void> Function() onLogout;
@@ -27,6 +34,8 @@ class VendorShell extends StatefulWidget {
 class _VendorShellState extends State<VendorShell> with WidgetsBindingObserver {
   late final AppState _state;
   StreamSubscription<AppEvent>? _sub;
+  PushTarget? _pendingOpen; // tap hua par vendor abhi load nahi hua
+  bool _permAsked = false;
 
   static const _titles = ['Dashboard', 'Orders', 'Products', 'Sales', 'More'];
 
@@ -38,12 +47,23 @@ class _VendorShellState extends State<VendorShell> with WidgetsBindingObserver {
     if (r != null) _state.seed(r);
     _sub = _state.events.listen(_toast);
     WidgetsBinding.instance.addObserver(this);
+    // Push: app khuli ho to banner, notification par tap to sahi screen (teeno haalat: band / background / khuli)
+    Push.onMessage = _onPushMessage;
+    Push.onOpen = _openTarget;
+    _pendingOpen = Push.takePendingOpen();
+    _state.addListener(_onStateChanged);
+    Push.start();
     _state.start();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onStateChanged()); // login se seed hua vendor pehle se maujood ho sakta hai
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    Push.onMessage = null;
+    Push.onOpen = null;
+    InAppBanner.hide();
+    _state.removeListener(_onStateChanged);
     _sub?.cancel();
     _state.dispose();
     super.dispose();
@@ -57,6 +77,86 @@ class _VendorShellState extends State<VendorShell> with WidgetsBindingObserver {
     } else if (s == AppLifecycleState.paused) {
       _state.stopPolling();
     }
+  }
+
+  // ------------------------------------------------------------------ push
+
+  /// App khuli hai aur push aayi: list/dashboard taza + in-app banner + awaaz.
+  void _onPushMessage(PushTarget t) {
+    if (!mounted || !_state.approved) return;
+    _state.onPushArrived();
+    if (t.isNewOrder) {
+      if (!_state.claimOrderAlert(t.orderId)) return; // poll pehle hi bata chuka
+      _ring();
+    } else {
+      HapticFeedback.mediumImpact();
+    }
+    InAppBanner.show(
+      context,
+      title: t.title.isEmpty ? (t.isNewOrder ? 'Naya order aaya hai' : 'Naya alert') : t.title,
+      body: t.body,
+      highlight: t.isNewOrder,
+      onTap: () => _openTarget(t),
+    );
+  }
+
+  /// Naye order ki awaaz + do dafa vibration (app khuli ho tab).
+  void _ring() {
+    try {
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.heavyImpact();
+      Future<void>.delayed(const Duration(milliseconds: 450), HapticFeedback.heavyImpact);
+    } catch (_) {}
+  }
+
+  /// Notification / banner par tap: order detail (ya sahi tab) kholo.
+  void _openTarget(PushTarget t) {
+    if (!mounted) return;
+    if (_state.vendor == null) {
+      _pendingOpen = t; // abhi load ho raha hai: load hote hi khulega
+      return;
+    }
+    if (!_state.approved) return; // approval baqi: kholne ko kuch nahi
+    InAppBanner.hide();
+    final nav = Navigator.of(context);
+    nav.popUntil((r) => r.isFirst); // pehle se khula detail / sheet band
+    if (t.hasOrder) {
+      _state.goTab(1);
+      unawaited(openOrderById(context, _state, t.orderId));
+      if (t.isNewOrder || t.type == 'order_cancelled') _state.ordersChanged(); // list bhi taza
+    } else if (t.isStock) {
+      _state.goTab(2);
+    } else {
+      _state.goTab(0);
+      _state.loadDashboard();
+    }
+  }
+
+  /// State badli: tap ka intezar ho to kholo, aur approve hote hi ek dafa notification ki ijazat ka screen.
+  void _onStateChanged() {
+    if (!mounted) return;
+    if (_pendingOpen != null && _state.vendor != null) {
+      final t = _pendingOpen!;
+      _pendingOpen = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openTarget(t));
+    }
+    if (!_permAsked && _state.approved) {
+      _permAsked = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _askNotifications());
+    }
+  }
+
+  Future<void> _askNotifications() async {
+    if (!mounted || !Push.ready) return;
+    if (await Push.notificationsOn()) return;
+    final p = await SharedPreferences.getInstance();
+    if (p.getBool('notif_prompt_done') == true || !mounted) return;
+    await p.setBool('notif_prompt_done', true);
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => const NotificationPermissionScreen(),
+    ));
   }
 
   void _toast(AppEvent e) {

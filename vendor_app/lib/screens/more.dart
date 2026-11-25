@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../models/vendor.dart';
 import '../services/app_state.dart';
+import '../services/push.dart';
 import '../theme.dart';
 import '../utils.dart';
 import '../widgets/section_title.dart';
+import 'permissions_help.dart';
 
 /// More tab: store ka chhota card, aglay phases ki list (jald), logout, version.
 class MoreScreen extends StatelessWidget {
@@ -41,6 +43,8 @@ class MoreScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           if (v != null) _StoreCard(v: v),
+          const SectionTitle('Alerts'),
+          const Card(child: _AlertsTile()),
           const SectionTitle('Jald aa raha hai'),
           const Card(
             child: Column(
@@ -121,6 +125,44 @@ class _StoreCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "Alerts & permissions": notification band ho to laal nishan; tap par madad screen (ijazat + battery).
+class _AlertsTile extends StatefulWidget {
+  const _AlertsTile();
+
+  @override
+  State<_AlertsTile> createState() => _AlertsTileState();
+}
+
+class _AlertsTileState extends State<_AlertsTile> {
+  late Future<bool> _on = Push.notificationsOn();
+
+  Future<void> _open() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const PermissionsHelpScreen()));
+    if (mounted) setState(() => _on = Push.notificationsOn());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _on,
+      builder: (context, snap) {
+        final off = snap.data == false;
+        return ListTile(
+          onTap: _open,
+          leading: Icon(off ? Icons.notifications_off_outlined : Icons.notifications_active_outlined,
+              color: off ? Colors.red.shade600 : kTeal),
+          title: const Text('Alerts & permissions', style: TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text(
+            off ? 'Notifications band hain - naye order ka alert nahi aayega' : 'Naya order ka alert, battery, awaaz',
+            style: TextStyle(color: off ? Colors.red.shade700 : Colors.black54, fontSize: 12.5),
+          ),
+          trailing: const Icon(Icons.chevron_right),
+        );
+      },
     );
   }
 }

@@ -39,7 +39,10 @@ class _VendorAppState extends State<VendorApp> {
   }
 
   Future<void> _logout() async {
-    await Api.logout();
+    // Is phone ka push band + token server se hatao: logout ke baad is phone par alert nahi aayega
+    final pushToken = Push.token;
+    await Push.stop();
+    await Api.logout(pushToken: pushToken);
     if (mounted) {
       setState(() {
         _loggedIn = false;

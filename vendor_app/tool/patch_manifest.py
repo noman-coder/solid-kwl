@@ -16,6 +16,8 @@ PERMS = [
     'android.permission.POST_NOTIFICATIONS',
     'android.permission.WAKE_LOCK',
     'android.permission.VIBRATE',
+    # Phase V7: 'Battery unrestricted' ki ijazat (permissions_help screen) - naye order ka alert band na ho
+    'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
 ]
 add = ''.join(f'    <uses-permission android:name="{p}"/>\n' for p in PERMS if p not in s)
 

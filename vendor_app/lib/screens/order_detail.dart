@@ -23,11 +23,21 @@ Future<void> openOrderDetail(BuildContext context, VendorOrder order) {
   ));
 }
 
+/// Push notification (ya koi aur jagah jahan sirf order id ho) se seedha detail kholo.
+Future<void> openOrderById(BuildContext context, AppState state, int orderId) {
+  return Navigator.of(context).push(MaterialPageRoute<void>(
+    builder: (_) => AppScope(state: state, child: OrderDetailScreen(orderId: orderId)),
+  ));
+}
+
 /// Order ka poora detail: status stepper, live map (rider chal raha ho tab), rider, customer, items, payment,
 /// commission ka andaza, history. Neeche action buttons (Qubool / Reject / Tayyar / Deliver).
 class OrderDetailScreen extends StatefulWidget {
-  final VendorOrder initial;
-  const OrderDetailScreen({super.key, required this.initial});
+  /// Order list se aaye to card ka data (turant dikhta hai). Push se aaye to sirf [orderId].
+  final VendorOrder? initial;
+  final int? orderId;
+  const OrderDetailScreen({super.key, this.initial, this.orderId})
+      : assert(initial != null || orderId != null, 'initial ya orderId dena zaroori hai');
 
   @override
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
@@ -47,7 +57,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
   Timer? _timer;
   int _ticks = 0;
 
-  int get _id => widget.initial.id;
+  int get _id => widget.initial?.id ?? widget.orderId!;
 
   @override
   void initState() {
@@ -196,7 +206,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
   Widget build(BuildContext context) {
     final st = AppScope.of(context);
     final d = _d;
-    final o = d?.order ?? widget.initial;
+    final o = d?.order ?? widget.initial; // push se khuli ho to load hone tak null
     final busy = st.orderBusy.contains(_id);
 
     Widget body;
@@ -239,7 +249,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
             _header(d),
             ..._mapSection(d),
             const SizedBox(height: 10),
-            if (o.status != 'cancelled') ...[_riderCard(d), const SizedBox(height: 10)],
+            if (d.order.status != 'cancelled') ...[_riderCard(d), const SizedBox(height: 10)],
             _customerCard(d),
             const SizedBox(height: 10),
             _itemsCard(d),
@@ -254,7 +264,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     final canAct = d != null && d.order.actions.isNotEmpty;
     return Scaffold(
       appBar: AppBar(
-        title: Text('#${o.orderNo}'),
+        title: Text(o != null ? '#${o.orderNo}' : 'Order'),
         actions: [
           IconButton(
             tooltip: 'Taza karein',

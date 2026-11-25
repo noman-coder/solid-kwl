@@ -59,6 +59,10 @@ jobs:
           fi
           python3 tool/patch_push.py android "$APP_ID"
 
+      # Phase V7: "Naye orders" notification ki alag awaaz (res/raw/new_order.wav) + notification ka rang
+      - name: Notification awaaz + rang lagao
+        run: python3 tool/patch_notification.py android
+
       - name: Purana auto-generated test hatao
         run: rm -rf test
 

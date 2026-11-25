@@ -7,6 +7,7 @@ import '../models/dashboard.dart';
 import '../models/orders.dart';
 import '../models/vendor.dart';
 import 'api.dart';
+import 'push.dart';
 
 /// Chhota message (toast).
 class AppEvent {
@@ -72,6 +73,7 @@ class AppState extends ChangeNotifier {
   Timer? _pollTimer;
   bool _polling = false;
   int _lastLatestId = -1; // -1 = abhi baseline nahi bana
+  int _alertedId = 0; // sab se naya order jis ki awaaz / banner ho chuka (push + poll dono ek hi baar bajayen)
 
   final StreamController<AppEvent> _events = StreamController<AppEvent>.broadcast();
   Stream<AppEvent> get events => _events.stream;
@@ -391,7 +393,10 @@ class AppState extends ChangeNotifier {
       final c = orderCounts;
       final countChanged = c != null && c['new'] != p.newCount;
       _lastLatestId = p.latestId;
-      if (hasNewer) _alertNewOrder();
+      if (hasNewer && p.latestId > _alertedId) {
+        _alertedId = p.latestId; // push pehle bata chuki ho to dobara awaaz nahi
+        _alertNewOrder();
+      }
       if (hasNewer || countChanged) {
         refreshOrders();
         loadDashboard();
@@ -407,6 +412,26 @@ class AppState extends ChangeNotifier {
     } finally {
       _polling = false;
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V7: Push (app khuli ho tab)
+  // ------------------------------------------------------------------
+
+  /// Push se naya order aaya (app khuli hai). true = pehli dafa: banner + awaaz dikhao.
+  /// false = ye order poll pehle hi bata chuka hai (dobara awaaz nahi).
+  bool claimOrderAlert(int orderId) {
+    if (orderId <= _alertedId) return false;
+    _alertedId = orderId;
+    return true;
+  }
+
+  /// Koi bhi push khuli app mein aayi: orders + dashboard (ginti, badge, alerts) foran taza.
+  void onPushArrived() {
+    if (_disposed || !approved) return;
+    refreshOrders();
+    loadDashboard();
+    pollOrders(); // baseline / badge sahi rahe
   }
 
   void _alertNewOrder() {
@@ -447,6 +472,7 @@ class AppState extends ChangeNotifier {
     }
     loading = false;
     notifyListeners();
+    if (approved) Push.sync(); // push token server tak na pohncha ho (net / approval) to dobara koshish
     // Abhi abhi approve hua ("Dobara check karein" ke baad): dashboard pehli dafa lao
     if (wasPending && approved) {
       loadDashboard();
