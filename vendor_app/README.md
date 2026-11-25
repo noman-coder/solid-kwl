@@ -1,7 +1,7 @@
 # Vendor App (Khanewal Connect - Android)
 
 Store owner (vendor) ke liye app. Rider app ke dhanche par bani hai; backend JSON API `api/vendor/...` hai
-(`app/customer/views_vendor_api.py`). Abhi **Phase V8**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)**.
+(`app/customer/views_vendor_api.py`). Abhi **Phase V9-B**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)**.
 Baqi tabs (Sales, More ke andar ka kaam) "Jald aa raha hai" hain, aglay phases mein bharenge.
 
 - App ka naam (placeholder): **Vendor App** - `.github/workflows/build_vendor_apk.yml` ke `env: APP_NAME` se badlein (sirf ek jagah).
@@ -29,6 +29,14 @@ Baqi tabs (Sales, More ke andar ka kaam) "Jald aa raha hai" hain, aglay phases m
   stock badge (khatam = laal, kam = narangi), rejected par **wajah**, pending par "Approval baqi". Card par tap = **quick edit**
   (rate, discount 0-90%, naya stock jama karna; web quick-update jaisi validation, negative stock nahi ban sakta). Neeche scroll par
   agla page, pull-to-refresh, skeleton, empty, error + retry, net band par purani list + "offline" message.
+- **Product add / edit (V9-A):** Products tab par **Naya product** button (ya khali list par "Pehla product add karein"); card par tap > quick edit > **Poora edit**.
+  3 step: **Basic** (naam, category search sheet, brand, unit, tafseel) > **Rate / Stock** (rate, discount, stock + "customer ko rate" aur "aap ko milega" ka live andaza) > **Review**.
+  Category / brand / unit na mile to search box mein naam likh kar **"+ naya banayein"** (wohi naam ho to wohi chun liya jata hai). Naye product ka adhoora form **phone mein draft** ban kar bachta hai
+  (net chala jaye ya app band ho). Submit dobara dabane / retry par product dohra nahi banta. Edit mein stock **jama** hota hai (kam nahi). Photo (**V9-B**): form ka **Photo** step - Camera / Gallery, crop, upload se pehle khud compress (lambi side ~1280 px, quality ~80, 1 MB se kam; server limit 5 MB), preview, hatana / badalna.
+  Product ki **sirf ek main photo** hoti hai. Submit par **progress bar**; net toote to form + compressed photo bacha rehta hai aur "Dobara koshish karein" se wohi product (request key) dobara bheji jati hai.
+  Draft mein photo ka path bhi hota hai (kamyab submit par draft + temp photo saaf). Submit ke baad message **server** ka (live / admin approval / photo badli). Bina photo wale products ke card par **"Photo lagayein"** nishan - tap par seedha edit form ka Photo step.
+  Photo badalne par (auto-approve band ho to) product dobara admin review mein jata hai - form pehle hi bata deta hai. Edit mein photo na chunein to purani photo bani rehti hai.
+  Camera system camera app se khulta hai aur Android 13+ par gallery system photo picker se - is liye CAMERA / gallery ki alag permission manifest mein nahi.
 - **Push notifications (V7):** login ke baad phone ka FCM token server par register (token badle to dobara, logout par hat jata hai). App band / screen lock / background - teeno haalat mein naya order, cancel, rider cash, review, stock ka alert.
   Do channel: **Naye orders** (alag "ding-dong" awaaz + lambi vibration) aur **Baqi updates**. Notification par **tap -> seedha wohi order** (app band, background ya khuli - teeno haalat). App khuli ho to upar **in-app banner + awaaz**
   (poll aur push mil kar ek hi baar bajate hain). Login ke baad ek dafa **notification ijazat ka saaf screen** (Android 13+), **More > Alerts & permissions** mein ijazat, **Battery: Unrestricted** aur "is phone ka alert server se juda hai?" ka status + Xiaomi/Oppo/Vivo/Samsung ki madad.
@@ -48,7 +56,7 @@ Baqi tabs (Sales, More ke andar ka kaam) "Jald aa raha hai" hain, aglay phases m
 
 ## Folder
 `lib/main.dart`, `theme.dart`, `utils.dart` | `lib/services` (api, app_state, push) | `lib/models` (vendor, dashboard, orders, order_detail) |
-`lib/screens` (login, shell, dashboard, orders, order_detail, pending, more, placeholder_tab, notification_permission, permissions_help) |
+`lib/screens` (login, shell, dashboard, orders, order_detail, products, product_form, pending, more, placeholder_tab, notification_permission, permissions_help) |
 `lib/widgets` (empty_state, skeleton, notice_card, loading, section_title, stat_card, week_chart, status_stepper, live_map, in_app_banner) |
 `tool/` (patch_gradle, patch_manifest, patch_push, patch_notification + `res/new_order.wav` - workflow `flutter create` ke baad chalata hai) | `assets/icon/`.
 Tafseel: `docs/VENDOR_PHASE3.md` (foundation), `docs/VENDOR_PHASE4.md` (dashboard), `docs/VENDOR_PHASE5.md` (orders), `docs/VENDOR_PHASE6.md` (order detail + live tracking), `docs/VENDOR_PHASE7.md` (push notifications).

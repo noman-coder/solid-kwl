@@ -1,7 +1,7 @@
 name: kconn_vendor
 description: Khanewal Connect Vendor app (store owner ke liye)
 publish_to: 'none'
-version: 0.8.0+8
+version: 0.9.1+10
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -21,6 +21,11 @@ dependencies:
   flutter_local_notifications: ^18.0.1
   # Phase V7: notification ki ijazat + battery unrestricted (rider app wala wahi version)
   permission_handler: ^11.3.1
+  # Phase V9-B: product ki photo - camera / gallery (Android 13+ par system photo picker, extra ijazat nahi),
+  # crop (UCropActivity - tool/patch_manifest.py lagata hai) aur upload se pehle compress
+  image_picker: ^1.1.2
+  image_cropper: ^8.0.2
+  flutter_image_compress: ^2.3.0
 
 dev_dependencies:
   flutter_lints: ^4.0.0

@@ -12,6 +12,7 @@ import '../utils.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/notice_card.dart';
 import '../widgets/skeleton.dart';
+import 'product_form.dart';
 
 /// Products tab: search + filter chips (Sab / Approved / Pending / Rejected / Kam stock / Khatam), list ya grid,
 /// har product par shop show/hide switch, card par tap = quick edit (rate, discount, naya stock).
@@ -89,6 +90,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
     AppScope.read(context).setProductFilter(f);
   }
 
+  Future<void> _addProduct() async {
+    HapticFeedback.selectionClick();
+    await openProductForm(context);
+  }
+
   Future<void> _toggle(VendorProduct p, bool v) async {
     HapticFeedback.selectionClick();
     await AppScope.read(context).toggleProduct(p, active: v);
@@ -158,7 +164,21 @@ class _ProductsScreenState extends State<ProductsScreen> {
       content = ListView(
         physics: physics,
         children: [
-          SizedBox(height: 380, child: EmptyState(icon: e.icon, title: e.title, message: e.message)),
+          SizedBox(
+            height: 380,
+            child: EmptyState(
+              icon: e.icon,
+              title: e.title,
+              message: e.message,
+              action: (filter == 'all' && st.productsQuery.isEmpty)
+                  ? FilledButton.icon(
+                      onPressed: _addProduct,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Pehla product add karein'),
+                    )
+                  : null,
+            ),
+          ),
         ],
       );
     } else {
@@ -213,13 +233,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   )
                 : l.hasMore
                     ? TextButton(onPressed: () => st.loadMoreProducts(), child: const Text('Aur products dikhayein'))
-                    : const SizedBox(height: 40),
+                    : const SizedBox(height: 90),
           ),
         ],
       );
     }
 
-    return Column(
+    final column = Column(
       children: [
         Container(
           color: Colors.white,
@@ -288,6 +308,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
         Expanded(child: RefreshIndicator(onRefresh: st.refreshProducts, child: content)),
       ],
     );
+
+    return Stack(
+      children: [
+        column,
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: FloatingActionButton.extended(
+            heroTag: 'vendor_add_product',
+            onPressed: _addProduct,
+            backgroundColor: kTeal,
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.add),
+            label: const Text('Naya product', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -319,13 +357,20 @@ class _Pill extends StatelessWidget {
   final String text;
   final Color color;
   final IconData? icon;
-  const _Pill({required this.text, required this.color, this.icon});
+
+  /// Tap karne par kaam (Phase V9-B: "Photo lagayein"). Null ho to sirf nishan.
+  final VoidCallback? onTap;
+  const _Pill({required this.text, required this.color, this.icon, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
+    final pill = Container(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: onTap == null ? 3 : 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: onTap == null ? 0.12 : 0.16),
+        borderRadius: BorderRadius.circular(20),
+        border: onTap == null ? null : Border.all(color: color.withValues(alpha: 0.5)),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -334,7 +379,15 @@ class _Pill extends StatelessWidget {
         ],
       ),
     );
+    if (onTap == null) return pill;
+    return GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: pill);
   }
+}
+
+/// Phase V9-B: bina photo wale product par "Photo lagayein" - seedha edit form ke Photos step par.
+void _addPhoto(BuildContext context, VendorProduct p) {
+  HapticFeedback.selectionClick();
+  pushProductForm(Navigator.of(context), AppScope.read(context), product: p, startAtPhotos: true);
 }
 
 /// Product ki tasveer (na ho ya na khule to icon).
@@ -404,6 +457,13 @@ class _Badges extends StatelessWidget {
       runSpacing: 4,
       children: [
         _Pill(text: _stockLabel(p), color: _stockColor(p.stockState), icon: Icons.inventory_2_outlined),
+        if (p.needsPhoto)
+          _Pill(
+            text: 'Photo lagayein',
+            color: Colors.orange.shade800,
+            icon: Icons.add_a_photo_outlined,
+            onTap: () => _addPhoto(context, p),
+          ),
         if (p.isPending) _Pill(text: 'Approval baqi', color: Colors.blue.shade700, icon: Icons.hourglass_top),
         if (p.isRejected) _Pill(text: 'Reject', color: Colors.red.shade700, icon: Icons.block),
         if (p.isApproved && !p.isActive) _Pill(text: 'Shop se chhupa', color: Colors.grey.shade700, icon: Icons.visibility_off),
@@ -629,6 +689,15 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
     setState(() => _error = null);
   }
 
+  /// Quick sheet band karke poora edit form kholo (navigator + state pehle se pakad lete hain).
+  void _openFullEdit() {
+    final nav = Navigator.of(context);
+    final st = AppScope.read(context);
+    final p = widget.product;
+    nav.pop();
+    pushProductForm(nav, st, product: p);
+  }
+
   Future<void> _save() async {
     final p = widget.product;
     final price = double.tryParse(_price.text.trim());
@@ -772,7 +841,16 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
                 child: Text(_error!, style: TextStyle(color: Colors.red.shade900, fontWeight: FontWeight.w600)),
               ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _saving ? null : _openFullEdit,
+                icon: const Icon(Icons.edit_note),
+                label: const Text('Poora edit (naam, category, tafseel...)'),
+              ),
+            ),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(

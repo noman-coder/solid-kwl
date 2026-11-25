@@ -1202,6 +1202,10 @@ urlpatterns = [
      path('api/vendor/products/', views_vendor_api.api_products, name='vendor_api_products'),
      path('api/vendor/products/quick-update/', views_vendor_api.api_products_quick_update, name='vendor_api_products_quick_update'),
      path('api/vendor/products/<int:pk>/toggle/', views_vendor_api.api_product_toggle, name='vendor_api_product_toggle'),
+     # ---- Phase V9-A: product add/edit (form-data/ pehle; <int:pk>/ edit toggle/ se alag hai) ----
+     path('api/vendor/products/form-data/', views_vendor_api.api_product_form_data, name='vendor_api_product_form_data'),
+     path('api/vendor/products/<int:pk>/', views_vendor_api.api_product_edit, name='vendor_api_product_edit'),
+     path('api/vendor/masters/<str:kind>/', views_vendor_api.api_create_master, name='vendor_api_create_master'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

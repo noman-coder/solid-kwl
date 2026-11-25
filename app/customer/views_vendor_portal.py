@@ -142,12 +142,18 @@ def _validate_image(f):
     return None
 
 
-def _clean_product_form(request, editing=False, prefix=''):
+def _clean_product_form(request, editing=False, prefix='', post=None, files=None, require_image=None):
     """
     POST data validate karo. `prefix` multi-row form ke liye ("p3-" => p3-name, p3-price ...).
     Returns (data dict, errors list).
+
+    Phase V9 (vendor app API): `post` / `files` dein to request.POST / request.FILES ki jagah wohi padhe jate
+    hain (JSON body se banaya string dict), `require_image=False` ho to naye product par bhi image zaroori nahi.
+    Web ke liye teeno default (None) hain, to web ka rawayya bilkul wahi hai.
     """
-    post = request.POST
+    post = request.POST if post is None else post
+    files = request.FILES if files is None else files
+    need_image = (not editing) if require_image is None else require_image
     errors = []
 
     name = post.get(prefix + 'name', '').strip()[:100]
@@ -197,7 +203,7 @@ def _clean_product_form(request, editing=False, prefix=''):
 
     try:
         stock = float(post.get(prefix + 'stock', '').strip() or '0')
-        if stock < 0 or stock > 1_000_000:
+        if not (0 <= stock <= 1_000_000):      # NaN bhi yahin pakda jata hai
             raise ValueError
     except ValueError:
         stock = 0
@@ -205,12 +211,12 @@ def _clean_product_form(request, editing=False, prefix=''):
     if not editing and stock <= 0:
         errors.append('Stock 0 se zyada likhein')
 
-    image = request.FILES.get(prefix + 'image')
+    image = files.get(prefix + 'image')
     if image:
         err = _validate_image(image)
         if err:
             errors.append(err)
-    elif not editing:
+    elif need_image:
         errors.append('Product ki image upload karein')
 
     return {
@@ -580,9 +586,13 @@ def _bulk_context(request, rows):
     }
 
 
-def _save_new_product(request, profile, warehouse, data):
-    """Ek naya product + uska stock save karo (apni transaction mein)."""
-    live = _auto_approve_products()
+def _save_new_product(request, profile, warehouse, data, user=None, force_pending=False):
+    """Ek naya product + uska stock save karo (apni transaction mein).
+
+    Phase V9: `user` (app token se aaya vendor user; web mein request.user) aur `force_pending` (bina photo wala
+    product auto-approve ke bawajood live na ho) - web ke liye dono default.
+    """
+    live = _auto_approve_products() and not force_pending
     cost = vendor_share(data['price'], data['discount'], commission_percent(profile))  # vendor ka hissa == shop ka cost
     with transaction.atomic():
         product = Product(
@@ -591,7 +601,7 @@ def _save_new_product(request, profile, warehouse, data):
             original_price=data['price'], price=data['price'],
             discount_percentage=data['discount'],
             image=data['image'],
-            vendor=profile.vendor, created_by=request.user,
+            vendor=profile.vendor, created_by=user or request.user,
             approval_status='approved' if live else 'pending',
             is_active=live,
         )
@@ -668,6 +678,69 @@ def vendor_product_add(request):
                   _bulk_context(request, [{'id': '1', 'v': _blank_values(), 'errors': []}]))
 
 
+def _apply_product_edit(profile, product, data, warehouse):
+    """Product ki tabdeeliyan save karo (web edit aur vendor app API dono yahi chalate hain).
+
+    `data` = `_clean_product_form` ka nateeja. True wapas aaye to product dobara admin review mein gaya.
+    ValidationError (jaise margin policy) uthta hai - caller pakde. Poora kaam ek transaction mein.
+    """
+    # Ye badlein to dobara review chahiye; price/stock/discount par nahi.
+    needs_review = (
+        data['name'] != product.name
+        or data['description'] != (product.description or '')
+        or data['category'] != product.category
+        or data['brand'] != product.brand
+        or data['image'] is not None
+    )
+    # Phase V9: bina photo ke jama hua (pending) product ko photo mil jaye to auto-approve setting ke hisab se live.
+    photo_completed = (
+        data['image'] is not None and not product.image and product.approval_status == 'pending'
+        and _auto_approve_products()
+    )
+
+    product.name = data['name']
+    product.description = data['description']
+    product.category = data['category']
+    product.brand = data['brand']
+    product.unit = data['unit']
+    product.original_price = data['price']
+    product.price = data['price']
+    product.discount_percentage = data['discount']
+
+    if data['image']:
+        product.image = data['image']
+    else:
+        # Product.save() har save par image dobara process karta hai (API call).
+        # Image na badli ho to usay skip karo.
+        product._image_processed = True
+
+    if product.approval_status == 'rejected' or (
+        needs_review and product.approval_status == 'approved' and not _auto_approve_products()
+    ):
+        product.approval_status = 'pending'
+        product.rejection_reason = ''
+        product.is_active = False
+        resubmitted = True
+    elif photo_completed:
+        product.approval_status = 'approved'
+        product.rejection_reason = ''
+        product.is_active = True
+        resubmitted = False
+    else:
+        resubmitted = False
+
+    pct = commission_percent(profile)
+    cost = vendor_share(data['price'], data['discount'], pct)
+    with transaction.atomic():
+        product.save()
+        reprice_open_batches(product, data['price'], data['discount'], pct)
+        if data['stock'] > 0:
+            if not warehouse:
+                raise ValidationError('Shop mein warehouse set nahi hai')
+            _add_stock(product, warehouse, data['stock'], cost, data['price'])
+    return resubmitted
+
+
 @vendor_login_required
 def vendor_product_edit(request, pk):
     profile = request.user.vendor_profile
@@ -687,51 +760,8 @@ def vendor_product_edit(request, pk):
             return render(request, 'customer_portal/vendor/product_form.html',
                           _form_context(request, product=product, data=request.POST))
 
-        # Ye badlein to dobara review chahiye; price/stock/discount par nahi.
-        needs_review = (
-            data['name'] != product.name
-            or data['description'] != (product.description or '')
-            or data['category'] != product.category
-            or data['brand'] != product.brand
-            or data['image'] is not None
-        )
-
-        product.name = data['name']
-        product.description = data['description']
-        product.category = data['category']
-        product.brand = data['brand']
-        product.unit = data['unit']
-        product.original_price = data['price']
-        product.price = data['price']
-        product.discount_percentage = data['discount']
-
-        if data['image']:
-            product.image = data['image']
-        else:
-            # Product.save() har save par image dobara process karta hai (API call).
-            # Image na badli ho to usay skip karo.
-            product._image_processed = True
-
-        if product.approval_status == 'rejected' or (
-            needs_review and product.approval_status == 'approved' and not _auto_approve_products()
-        ):
-            product.approval_status = 'pending'
-            product.rejection_reason = ''
-            product.is_active = False
-            resubmitted = True
-        else:
-            resubmitted = False
-
-        pct = commission_percent(profile)
-        cost = vendor_share(data['price'], data['discount'], pct)
         try:
-            with transaction.atomic():
-                product.save()
-                reprice_open_batches(product, data['price'], data['discount'], pct)
-                if data['stock'] > 0:
-                    if not warehouse:
-                        raise ValidationError('Shop mein warehouse set nahi hai')
-                    _add_stock(product, warehouse, data['stock'], cost, data['price'])
+            resubmitted = _apply_product_edit(profile, product, data, warehouse)
         except ValidationError as exc:
             messages.error(request, f'❌ {_err_text(exc)}')
             return render(request, 'customer_portal/vendor/product_form.html',
@@ -760,17 +790,55 @@ MASTER_LABELS = {'category': 'Category', 'brand': 'Brand', 'unit': 'Unit'}
 MASTER_CREATE_LIMIT = 20          # ek vendor ghante mein itne naye naam bana sakta hai
 
 
+def create_master_entry(user_id, kind, raw_name):
+    """Naya Category/Brand/Unit banao (web "+" button aur vendor app API dono). Returns (payload dict, http status).
+
+    Agar wohi naam pehle se hai (capital/small ya extra spaces ka farq ignore) to naya nahi banta,
+    mojooda wala wapas aata hai (existed=True). Ek user ghante mein MASTER_CREATE_LIMIT se zyada naye naam nahi.
+    """
+    model = MASTER_MODELS.get(kind)
+    if not model:
+        return {'success': False, 'message': 'Invalid request'}, 400
+    label = MASTER_LABELS[kind]
+
+    name = ' '.join(str(raw_name or '').split())
+    if len(name) < 2 or len(name) > 100:
+        return {'success': False, 'message': f'{label} ka naam 2 se 100 characters ka likhein.'}, 200
+
+    existing = model.objects.filter(name__iexact=name).first()
+    if existing:
+        return {'success': True, 'id': existing.id, 'name': existing.name, 'existed': True}, 200
+
+    # Spam se bachao: ek vendor sirf limited naye naam bana sake.
+    key = f'vendor_master_create_{user_id}'
+    used = cache.get(key, 0)
+    if used >= MASTER_CREATE_LIMIT:
+        return {'success': False,
+                'message': 'Naye naam banane ki hadd poori ho gayi, thori der baad koshish karein.'}, 200
+
+    try:
+        obj = model.objects.create(name=name)
+    except IntegrityError:           # isi lamhe kisi aur ne wohi naam bana diya
+        obj = model.objects.filter(name__iexact=name).first()
+        if not obj:
+            return {'success': False, 'message': 'Save nahi ho saka, dobara koshish karein.'}, 200
+        return {'success': True, 'id': obj.id, 'name': obj.name, 'existed': True}, 200
+
+    cache.set(key, used + 1, 3600)
+    # Shop ke category/brand filter ki list 10 minute cache hoti hai; naya naam foran dikhane ke liye hata do.
+    cache.delete('all_categories')
+    cache.delete('all_brands')
+    return {'success': True, 'id': obj.id, 'name': obj.name, 'existed': False}, 200
+
+
 @vendor_login_required
 @require_POST
 def vendor_create_master(request, kind):
     """
-    "+" button: naya Category/Brand/Unit banao. Agar wohi naam pehle se hai
-    (capital/small ya extra spaces ka farq ignore) to naya nahi banta, mojooda wala wapas aata hai.
+    "+" button: naya Category/Brand/Unit banao (logic `create_master_entry` mein, app API bhi wahi chalati hai).
     """
-    model = MASTER_MODELS.get(kind)
-    if not model:
+    if kind not in MASTER_MODELS:
         return JsonResponse({'success': False, 'message': 'Invalid request'}, status=400)
-    label = MASTER_LABELS[kind]
 
     if not request.user.vendor_profile.is_approved:
         return JsonResponse({'success': False, 'message': 'Aap ka account abhi approve nahi hua.'}, status=403)
@@ -779,34 +847,10 @@ def vendor_create_master(request, kind):
         payload = json.loads(request.body or '{}')
     except ValueError:
         payload = {}
-    name = ' '.join(str(payload.get('name', '')).split())
-    if len(name) < 2 or len(name) > 100:
-        return JsonResponse({'success': False, 'message': f'{label} ka naam 2 se 100 characters ka likhein.'})
-
-    existing = model.objects.filter(name__iexact=name).first()
-    if existing:
-        return JsonResponse({'success': True, 'id': existing.id, 'name': existing.name, 'existed': True})
-
-    # Spam se bachao: ek vendor sirf limited naye naam bana sake.
-    key = f'vendor_master_create_{request.user.id}'
-    used = cache.get(key, 0)
-    if used >= MASTER_CREATE_LIMIT:
-        return JsonResponse({'success': False,
-                             'message': 'Naye naam banane ki hadd poori ho gayi, thori der baad koshish karein.'})
-
-    try:
-        obj = model.objects.create(name=name)
-    except IntegrityError:           # isi lamhe kisi aur ne wohi naam bana diya
-        obj = model.objects.filter(name__iexact=name).first()
-        if not obj:
-            return JsonResponse({'success': False, 'message': 'Save nahi ho saka, dobara koshish karein.'})
-        return JsonResponse({'success': True, 'id': obj.id, 'name': obj.name, 'existed': True})
-
-    cache.set(key, used + 1, 3600)
-    # Shop ke category/brand filter ki list 10 minute cache hoti hai; naya naam foran dikhane ke liye hata do.
-    cache.delete('all_categories')
-    cache.delete('all_brands')
-    return JsonResponse({'success': True, 'id': obj.id, 'name': obj.name, 'existed': False})
+    if not isinstance(payload, dict):
+        payload = {}
+    body, status = create_master_entry(request.user.id, kind, payload.get('name', ''))
+    return JsonResponse(body, status=status)
 
 
 @vendor_login_required

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -565,6 +566,45 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     if (changed) loadDashboard(); // stock / low-stock ginti badal sakti hai
     return err;
+  }
+
+  /// Product add ([id] null) ya edit. Kamyab ho to result, warna server ka saaf message (form mein dikhane ke liye).
+  /// Session khatam / approval hat gayi ho to yahin sambhal leta hai (dono null).
+  Future<({ProductSaveResult? result, String? error})> saveProduct({
+    int? id,
+    required Map<String, dynamic> fields,
+    String? requestKey,
+    File? photo,
+    void Function(double)? onProgress,
+  }) async {
+    try {
+      final r = await Api.saveProduct(
+          id: id, fields: fields, requestKey: requestKey, photo: photo, onProgress: onProgress);
+      if (_disposed) return (result: null, error: null);
+      if (id != null && r.product != null) _applyProduct(r.product!);
+      productCounts = r.counts;
+      if (id == null || r.product == null) {
+        // naya product kisi list mein nahi hai: sab lists purani, abhi wali dobara load
+        for (final f in kProductFilters) {
+          if (f != productFilter && productList(f).loaded) productList(f).stale = true;
+        }
+        loadProducts(productFilter);
+      }
+      notifyListeners();
+      loadDashboard(); // products / pending ginti
+      return (result: r, error: null);
+    } on ApiException catch (e) {
+      if (_disposed) return (result: null, error: null);
+      if (e.authExpired) {
+        await _sessionExpired();
+        return (result: null, error: null);
+      }
+      if (e.pending) {
+        await refresh();
+        return (result: null, error: null);
+      }
+      return (result: null, error: e.message);
+    }
   }
 
   /// Detail screen jaisi jagah se aaya ApiException: session khatam / approval hat gayi ho to yahin sambhal lo

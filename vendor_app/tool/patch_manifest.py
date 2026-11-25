@@ -30,8 +30,23 @@ if '<queries>' in s:
 else:
     add += '    <queries>\n' + INTENTS + '    </queries>\n'
 
+# Phase V9-B: camera app (photo lene ke liye) - Android 11+ par package visibility
+CAMERA_INTENT = '        <intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>\n'
+if '<queries>' in s:
+    if 'android.media.action.IMAGE_CAPTURE' not in s:
+        s = s.replace('<queries>', '<queries>\n' + CAMERA_INTENT, 1)
+elif 'android.media.action.IMAGE_CAPTURE' not in add:
+    add = add.replace('    </queries>\n', CAMERA_INTENT + '    </queries>\n', 1)
+
 if add:
     s = s.replace('<application', add + '    <application', 1)
+
+# Phase V9-B: image_cropper ki crop screen (UCrop) - iske baghair crop par app crash karti hai.
+# Camera ki CAMERA permission jaan-boojh kar nahi lagayi: photo system camera app se aati hai (ijazat ki zaroorat nahi).
+UCROP = ('        <activity android:name="com.yalantis.ucrop.UCropActivity" android:screenOrientation="portrait" '
+         'android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>')
+if 'com.yalantis.ucrop.UCropActivity' not in s:
+    s = s.replace('</application>', UCROP + '\n    </application>', 1)
 
 # Push notification: FCM ka default channel (server vendor_push.py 'new_orders' / 'updates' channel par bhejta hai)
 META = '<meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="new_orders"/>'

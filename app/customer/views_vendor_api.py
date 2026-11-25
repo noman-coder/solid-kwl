@@ -8,6 +8,9 @@ Phase V5: orders tab - list (Naye / Chal rahe / Mukammal + search + page), actio
 Phase V6: order detail (items + images, customer, payment, status steps, rider, commission), live track (rider ki location),
           assign-rider (list + assign).
 Phase V8: products tab - list (search/filter/page), toggle (shop par show/hide), quick-update (rate/discount/naya stock).
+Phase V9-A: product add/edit - form-data (category/brand/unit list + limits + edit ke liye maujooda values),
+          add (POST products/), edit (POST products/<id>/), naya category/brand/unit (POST masters/<kind>/).
+          Validation web wali `_clean_product_form` / `_validate_image` hi hai. Photo optional hai (V9-B: app camera/gallery se bhejti hai).
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -23,13 +26,14 @@ Usool:
 """
 import json
 import logging
+import re
 from datetime import datetime, time as dtime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from functools import wraps
 
 from django.contrib.auth import authenticate
 from django.core import signing
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Case, Count, F, FloatField, OuterRef, Q, Subquery, Sum, Value, When
@@ -41,14 +45,16 @@ from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from ..models import (DeliveryInfo, Inventory, OrderTracking, Product, RiderCashHandover, RiderProfile, SaleOrder,
-                      VendorProfile, VendorPushToken)
+from ..models import (Brand, Category, DeliveryInfo, Inventory, OrderTracking, Product, RiderCashHandover, RiderProfile, SaleOrder,
+                      Unit, VendorProfile, VendorPushToken)
 from ..vendor_commission import CENT, HUNDRED, commission_percent, vendor_earnings
 from . import store_orders
 from .views_customer_auth import get_client_ip, normalize_phone
 from .views_reviews import vendor_rating
 from .views_vendor_portal import (
-    LOGIN_LOCK_SECONDS, LOGIN_MAX_ATTEMPTS, ORDER_TABS, _login_key, _stock_warehouse,
+    LOGIN_LOCK_SECONDS, LOGIN_MAX_ATTEMPTS, MASTER_MODELS, MAX_IMAGE_BYTES, MAX_PRICE, ORDER_TABS,
+    _apply_product_edit, _auto_approve_products, _clean_product_form, _err_text, _login_key, _save_new_product,
+    _stock_warehouse, create_master_entry,
 )
 from .views_vendor_tools import LOW_STOCK_DEFAULT, _analytics_data, _stock_rows, quick_update_product
 
@@ -925,6 +931,7 @@ def _product_json(p):
         'visible': bool(approved and p.is_active),      # customer ko nazar aa raha hai?
         'can_toggle': approved,
         'can_edit_price': True,
+        'needs_photo': not bool(p.image),               # Phase V9-B: card par "Photo lagayein"
     }
 
 
@@ -941,13 +948,16 @@ def _product_counts(vendor):
     return c
 
 
-@vendor_api(['GET'])
+@vendor_api(['GET', 'POST'])
 def api_products(request, profile):
     """GET /api/vendor/products/?q=&status=approved|pending|rejected&stock=low|out&page=1
+    (POST /api/vendor/products/ = naya product, dekhein `_product_create`)
 
     q: naam ya barcode. stock=low -> kam stock (>0 aur threshold tak), stock=out -> khatam. Page 20 ka; `has_more`.
     Ghalat status/stock value chupchap ignore (sab dikhao).
     """
+    if request.method == 'POST':
+        return _product_create(request, profile)
     vendor = profile.vendor
     q = (request.GET.get('q') or '').strip()[:60]
     status = request.GET.get('status', '')
@@ -1108,3 +1118,295 @@ def api_products_quick_update(request, profile):
         out['error'] = msg
         return JsonResponse(out, status=400)
     return JsonResponse(out)
+
+
+# ================================================================
+# Phase V9-A: product add / edit (+ form-data, naya category/brand/unit)
+# ================================================================
+
+_FORM_KEYS = ('name', 'description', 'category', 'brand', 'unit', 'price', 'discount_percentage', 'stock')
+_REQUEST_KEY_RE = re.compile(r'^[A-Za-z0-9_-]{8,64}$')
+NAME_MIN, NAME_MAX, DESC_MAX, MAX_DISCOUNT, MAX_STOCK = 3, 100, 2000, 90, 1_000_000
+
+
+def _validation_err(errors, status=400):
+    """Form ki ghaltiyan: error/message mein pehli, `errors` mein sab (app ek hi baar mein sab dikha sake)."""
+    errors = [e for e in errors if e] or ['Form mein ghalti hai']
+    return JsonResponse({'ok': False, 'error': errors[0], 'message': errors[0], 'code': 'validation',
+                         'errors': errors}, status=status)
+
+
+def _current_form_value(product, key):
+    """Edit mein jo field bheji hi nahi gayi uski maujooda value (web form wali string shakl mein)."""
+    if key == 'name':
+        return product.name or ''
+    if key == 'description':
+        return product.description or ''
+    if key in ('category', 'brand', 'unit'):
+        return str(getattr(product, key + '_id') or '')
+    if key == 'price':
+        base = product.original_price if product.original_price and product.original_price > 0 else product.price
+        return str(base)
+    if key == 'discount_percentage':
+        return str(product.discount_percentage or 0)
+    return '0'                                        # stock: edit mein "naya stock add" hota hai
+
+
+def _form_post(d, product=None):
+    """JSON/multipart body ko web form jaisi string dict banao (`_clean_product_form` ke `post` ke liye).
+
+    `discount` bhi `discount_percentage` ki jagah chalta hai. Edit (`product` diya ho) mein jo key bheji hi na
+    ho wo maujooda value rehti hai (partial update / sirf photo badalna); bheji hui khali key ghalti shumar hogi.
+    """
+    out = {}
+    for k in _FORM_KEYS:
+        src = k
+        if k == 'discount_percentage' and k not in d and 'discount' in d:
+            src = 'discount'
+        if src in d:
+            out[k] = _raw(d.get(src))
+        elif product is not None:
+            out[k] = _current_form_value(product, k)
+        else:
+            out[k] = ''
+    return out
+
+
+def _named(qs):
+    return [{'id': o.pk, 'name': o.name} for o in qs.only('id', 'name').order_by('name')]
+
+
+def _form_product_json(p, profile):
+    """Edit form ke liye: product ki maujooda values (form ke field naamon mein)."""
+    wh = _stock_warehouse()
+    inv = Inventory.objects.filter(product=p, warehouse=wh).first() if wh else None
+    base = p.original_price if p.original_price and p.original_price > 0 else p.price
+    return {
+        'id': p.pk,
+        'name': p.name,
+        'description': p.description or '',
+        'category': p.category_id,
+        'brand': p.brand_id,
+        'unit': p.unit_id,
+        'price': _money(base),
+        'discount_percentage': _money(p.discount_percentage),
+        'current_stock': _qty(inv.stock if inv else 0),
+        'barcode': p.barcode or '',
+        'image': _media_url(p.image),
+        'has_image': bool(p.image),
+        'approval_status': p.approval_status,
+        'rejection_reason': (p.rejection_reason or '') if p.approval_status == 'rejected' else '',
+        'is_active': bool(p.is_active),
+    }
+
+
+@vendor_api(['GET'])
+def api_product_form_data(request, profile):
+    """GET /api/vendor/products/form-data/[?product=<id>]
+
+    Form ke dropdown (categories, brands, units - web `_form_context` wali), limits, commission % aur
+    auto-approve ka haal. `product` dein to us (apne) product ki maujooda values bhi (edit form ke liye);
+    doosre vendor ka ya maujood na ho to 404.
+    """
+    out = {
+        'ok': True,
+        'categories': _named(Category.objects.all()),
+        'brands': _named(Brand.objects.all()),
+        'units': _named(Unit.objects.all()),
+        'commission_percent': _money(commission_percent(profile)),
+        'auto_approve': bool(_auto_approve_products()),
+        'can_add': bool(_stock_warehouse()),
+        'limits': {
+            'name_min': NAME_MIN, 'name_max': NAME_MAX, 'description_max': DESC_MAX,
+            'max_price': float(MAX_PRICE), 'max_discount': MAX_DISCOUNT, 'max_stock': MAX_STOCK,
+            'max_image_mb': MAX_IMAGE_BYTES // (1024 * 1024), 'master_name_min': 2, 'master_name_max': 100,
+        },
+    }
+    raw = request.GET.get('product')
+    if raw not in (None, ''):
+        try:
+            pid = int(raw)
+        except (TypeError, ValueError):
+            pid = None
+        product = Product.objects.filter(pk=pid, vendor=profile.vendor).select_related('category').first() \
+            if pid else None
+        if product is None:
+            return _err('Ye product nahi mila.', 404, code='not_found')
+        out['product'] = _form_product_json(product, profile)
+    return JsonResponse(out)
+
+
+def _product_create(request, profile):
+    """POST /api/vendor/products/   (JSON ya multipart; `image` file optional)
+
+    Fields: name, description, category (id), brand (id), unit (id), price (discount se pehle ka rate),
+    discount_percentage (ya `discount`), stock, image (file, optional), request_key (optional - double tap /
+    retry par dobara product na bane).
+    Validation + save web wala (`_clean_product_form`, `_save_new_product`). Auto-approve ho to live, warna pending.
+    Bina photo wala product auto-approve par bhi pending rehta hai (`needs_photo`) jab tak photo na aaye.
+    """
+    vendor = profile.vendor
+    if not _stock_warehouse():
+        return _err('Shop mein warehouse set nahi hai, admin se rabta karein.', 409, code='no_warehouse')
+    d = _data(request)
+
+    rk = str(d.get('request_key') or '')
+    rk = rk if _REQUEST_KEY_RE.match(rk) else ''
+    done_key = lock_key = ''
+    if rk:
+        done_key = f'vendor_prod_add:{vendor.pk}:{rk}'
+        lock_key = done_key + ':lock'
+        prev = cache.get(done_key)
+        if prev:
+            fresh = _fresh_product(vendor, prev)
+            if fresh is not None:
+                return JsonResponse({'ok': True, 'message': 'Ye product pehle hi save ho chuka hai.', 'duplicate': True,
+                                     'product': _product_json(fresh), 'counts': _product_counts(vendor),
+                                     'needs_photo': not bool(fresh.image),
+                                     'live': fresh.approval_status == 'approved'})
+        if not cache.add(lock_key, 1, 30):
+            return _err('Product save ho raha hai, thora intezar karein.', 409, code='in_progress')
+
+    try:
+        data, errors = _clean_product_form(request, editing=False, post=_form_post(d), files=request.FILES,
+                                           require_image=False)
+        if errors:
+            return _validation_err(errors)
+        no_photo = data['image'] is None
+        photo_failed = False
+        try:
+            product = _save_new_product(request, profile, _stock_warehouse(), data, user=profile.user,
+                                        force_pending=no_photo)
+        except ValidationError as exc:
+            return _validation_err([_err_text(exc)])
+        except Exception:
+            logger.exception('Vendor API product add error')
+            product = None
+            if not no_photo:
+                # Phase V9-B: photo ki storage/upload fail ho to product na toote - bina photo ke save karo,
+                # vendor ko batao ke photo dobara lagayein (edit se).
+                try:
+                    data['image'] = None
+                    product = _save_new_product(request, profile, _stock_warehouse(), data, user=profile.user,
+                                                force_pending=True)
+                    no_photo = True
+                    photo_failed = True
+                except Exception:
+                    logger.exception('Vendor API product add retry (without photo) error')
+            if product is None:
+                return _err('Product save nahi ho saka, dobara koshish karein.', 500, code='server')
+        if done_key:
+            cache.set(done_key, product.pk, 600)
+    finally:
+        if lock_key:
+            cache.delete(lock_key)
+
+    live = product.approval_status == 'approved'
+    if live:
+        msg = 'Product shop par list ho gaya!'
+    elif photo_failed:
+        msg = 'Product save ho gaya, lekin photo upload nahi ho saki. Product par "Photo lagayein" se dobara lagayein.'
+    elif no_photo:
+        msg = 'Product save ho gaya. Photo lagane ke baad hi ye shop par aa sakega.'
+    else:
+        msg = 'Product jama ho gaya. Admin approval ke baad shop par nazar aayega.'
+    return JsonResponse({'ok': True, 'message': msg, 'live': live, 'needs_photo': no_photo,
+                         'photo_failed': photo_failed,
+                         'product': _product_json(_fresh_product(vendor, product.pk)),
+                         'counts': _product_counts(vendor)})
+
+
+@vendor_api(['POST'])
+def api_product_edit(request, profile, pk):
+    """POST /api/vendor/products/<id>/   (JSON ya multipart)
+
+    Web edit jaisa: price = discount se pehle ka rate, `stock` = naya stock JO ADD karna hai (0/khali = koi nahi).
+    Jo field bheji hi na jaye wo waisi hi rehti hai (sirf photo badalna ho to sirf `image` bhejein).
+    Naam/description/category/brand/photo badle to (auto-approve na ho) product dobara admin review mein jata hai;
+    rejected product edit par dobara pending ho jata hai (`resubmitted`). Doosre vendor ka product -> 404.
+    `request_key` (optional): retry / double tap par wohi tabdeeli (stock samet) dobara lagu nahi hoti (`duplicate`).
+    """
+    vendor = profile.vendor
+    product = Product.objects.filter(pk=pk, vendor=vendor).first()
+    if product is None:
+        return _err('Ye product nahi mila.', 404, code='not_found')
+    d = _data(request)
+
+    # Phase V9-B: photo upload lambi request hai - jawab raste mein kho jaye to retry par stock dobara jama na ho
+    # (edit mein stock "add" hota hai). App edit par bhi `request_key` bhejti hai.
+    rk = str(d.get('request_key') or '')
+    rk = rk if _REQUEST_KEY_RE.match(rk) else ''
+    done_key = lock_key = ''
+    if rk:
+        done_key = f'vendor_prod_edit:{vendor.pk}:{pk}:{rk}'
+        lock_key = done_key + ':lock'
+        if cache.get(done_key):
+            fresh = _fresh_product(vendor, pk)
+            if fresh is not None:
+                return JsonResponse({'ok': True, 'message': 'Ye tabdeeli pehle hi lag chuki hai.', 'duplicate': True,
+                                     'resubmitted': False, 'live': fresh.approval_status == 'approved',
+                                     'needs_photo': not bool(fresh.image), 'product': _product_json(fresh),
+                                     'counts': _product_counts(vendor)})
+        if not cache.add(lock_key, 1, 30):
+            return _err('Update ho raha hai, thora intezar karein.', 409, code='in_progress')
+
+    try:
+        data, errors = _clean_product_form(request, editing=True, post=_form_post(d, product), files=request.FILES,
+                                           require_image=False)
+        if errors:
+            return _validation_err(errors)
+        had_photo = bool(product.image)
+        new_photo = data['image'] is not None
+        try:
+            with transaction.atomic():
+                locked = Product.objects.select_for_update().filter(pk=pk, vendor=vendor).first()
+                if locked is None:
+                    return _err('Ye product nahi mila.', 404, code='not_found')
+                resubmitted = _apply_product_edit(profile, locked, data, _stock_warehouse())
+        except ValidationError as exc:
+            return _validation_err([_err_text(exc)])
+        except Exception:
+            logger.exception('Vendor API product edit error')
+            if new_photo:
+                return _err('Photo upload nahi ho saki, dobara koshish karein. Baqi data waisa hi hai.', 500,
+                            code='server')
+            return _err('Update nahi ho saka, dobara koshish karein.', 500, code='server')
+        fresh = _fresh_product(vendor, pk)
+        live = fresh.approval_status == 'approved'
+        if resubmitted:
+            msg = ('Photo badal gayi. Product dobara admin review ke liye gaya hai.' if new_photo
+                   else 'Update ho gaya. Tabdeeli dobara admin review ke liye gayi hai.')
+        elif new_photo and not had_photo:
+            msg = ('Photo lag gayi, product live ho gaya!' if live
+                   else 'Photo lag gayi. Admin approval ke baad product shop par nazar aayega.')
+        elif new_photo:
+            msg = 'Photo badal gayi.'
+        else:
+            msg = 'Product update ho gaya.'
+        if done_key:
+            cache.set(done_key, 1, 600)
+        return JsonResponse({'ok': True, 'message': msg, 'resubmitted': resubmitted, 'live': live,
+                             'needs_photo': not bool(fresh.image), 'product': _product_json(fresh),
+                             'counts': _product_counts(vendor)})
+    finally:
+        if lock_key:
+            cache.delete(lock_key)
+
+
+@vendor_api(['POST'])
+def api_create_master(request, profile, kind):
+    """POST /api/vendor/masters/<category|brand|unit>/   body: {name}
+
+    "+" button: naya Category/Brand/Unit (web `create_master_entry`). Wohi naam pehle se ho to wohi wapas
+    (`existed: true`). Ghalat kind -> 404.
+    """
+    if kind not in MASTER_MODELS:
+        return _err('Ye cheez nahi mili.', 404, code='not_found')
+    payload, status = create_master_entry(profile.user_id, kind, _data(request).get('name', ''))
+    if not payload.get('success'):
+        msg = payload.get('message') or 'Save nahi ho saka.'
+        return _err(msg, status if status != 200 else 400, code='validation')
+    return JsonResponse({'ok': True, 'kind': kind, 'id': payload['id'], 'name': payload['name'],
+                         'existed': bool(payload.get('existed')),
+                         'message': 'Pehle se maujood hai, wohi chun liya.' if payload.get('existed')
+                         else 'Naya naam jod diya.'})

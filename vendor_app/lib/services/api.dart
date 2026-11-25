@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -39,6 +41,28 @@ class LoginResult {
   final Vendor vendor;
   final String? message;
   const LoginResult(this.vendor, this.message);
+}
+
+/// Multipart request jo upload ke dauran bheje gaye bytes ka haal batata hai (progress bar ke liye).
+class _ProgressMultipartRequest extends http.MultipartRequest {
+  final void Function(int sent, int total)? onProgress;
+  _ProgressMultipartRequest(super.method, super.url, {this.onProgress});
+
+  @override
+  http.ByteStream finalize() {
+    final stream = super.finalize();
+    final cb = onProgress;
+    if (cb == null) return stream;
+    final total = contentLength;
+    var sent = 0;
+    return http.ByteStream(stream.transform(StreamTransformer<List<int>, List<int>>.fromHandlers(
+      handleData: (data, sink) {
+        sent += data.length;
+        cb(sent, total);
+        sink.add(data);
+      },
+    )));
+  }
 }
 
 class Api {
@@ -92,13 +116,21 @@ class Api {
     } catch (_) {
       throw ApiException('Internet ya server se rabta nahi ho raha', 0, code: 'network');
     }
+    return _decode(r);
+  }
+
+  /// Server ka jawab JSON mein kholo; galti ho to ApiException.
+  static Map<String, dynamic> _decode(http.Response r) {
     var data = <String, dynamic>{};
     try {
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
       if (decoded is Map) data = Map<String, dynamic>.from(decoded);
     } catch (_) {}
     if (r.statusCode >= 400 || data['ok'] == false) {
-      final msg = s(data['message'] ?? data['error']);
+      var msg = s(data['message'] ?? data['error']);
+      if (msg.isEmpty && r.statusCode == 413) {
+        msg = 'Photo server ke liye bohat bari hai. Chhoti photo chunein.';
+      }
       throw ApiException(
         msg.isEmpty ? 'Kuch masla aa gaya (${r.statusCode}). Dobara koshish karein.' : msg,
         r.statusCode,
@@ -106,6 +138,28 @@ class Api {
       );
     }
     return data;
+  }
+
+  /// Photo ke saath POST (multipart). [onProgress] 0.0 - 1.0 (bheje gaye bytes). Net / time-out par 'network' error.
+  static Future<Map<String, dynamic>> _multipart(String path,
+      {required Map<String, dynamic> fields, required File file, void Function(double)? onProgress}) async {
+    http.Response r;
+    try {
+      final req = _ProgressMultipartRequest('POST', _u(path), onProgress: (sent, total) {
+        if (onProgress != null && total > 0) onProgress((sent / total).clamp(0.0, 1.0).toDouble());
+      });
+      req.headers['Accept'] = 'application/json';
+      if (token != null) req.headers['Authorization'] = 'Bearer $token';
+      fields.forEach((k, v) {
+        if (v != null) req.fields[k] = v.toString();
+      });
+      req.files.add(await http.MultipartFile.fromPath('image', file.path, filename: 'photo.jpg'));
+      final streamed = await req.send().timeout(const Duration(seconds: 120));
+      r = await http.Response.fromStream(streamed).timeout(const Duration(seconds: 120));
+    } catch (_) {
+      throw ApiException('Internet ya server se rabta nahi ho raha. Photo upload nahi hui.', 0, code: 'network');
+    }
+    return _decode(r);
   }
 
   // ------------------------------------------------------------------
@@ -297,6 +351,42 @@ class Api {
       first['product'] is Map ? VendorProduct.fromJson(asMap(first['product'])) : null,
       countsFrom(d['counts']),
     );
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V9-A: product add / edit
+  // ------------------------------------------------------------------
+
+  /// Form ke dropdown (category / brand / unit), hadood, commission %. [productId] dein to edit ki maujooda values bhi.
+  static Future<ProductFormData> productFormData({int? productId}) async {
+    final d = await _req('GET', '/api/vendor/products/form-data/${productId == null ? '' : '?product=$productId'}');
+    return ProductFormData.fromJson(d);
+  }
+
+  /// Naya product ([id] null) ya purana edit. [requestKey] dono mein bhejein: double tap / retry par server dobara
+  /// product nahi banata / stock dobara jama nahi karta. Edit mein `stock` = naya stock jo jama karna hai.
+  ///
+  /// Phase V9-B: [photo] dein (compressed JPEG) to multipart mein `image` ke saath jata hai aur [onProgress]
+  /// (0.0 - 1.0) upload ka haal batata hai. Photo na ho to purana JSON tareeqa.
+  static Future<ProductSaveResult> saveProduct({
+    int? id,
+    required Map<String, dynamic> fields,
+    String? requestKey,
+    File? photo,
+    void Function(double)? onProgress,
+  }) async {
+    final body = <String, dynamic>{...fields, if (requestKey != null) 'request_key': requestKey};
+    final path = id == null ? '/api/vendor/products/' : '/api/vendor/products/$id/';
+    final d = photo == null
+        ? await _req('POST', path, body: body)
+        : await _multipart(path, fields: body, file: photo, onProgress: onProgress);
+    return ProductSaveResult.fromJson(d);
+  }
+
+  /// "+" button: naya category / brand / unit ([kind]: category | brand | unit). Wohi naam ho to wohi wapas.
+  static Future<NamedItem> createMaster(String kind, String name) async {
+    final d = await _req('POST', '/api/vendor/masters/$kind/', body: {'name': name});
+    return NamedItem(toI(d['id']), s(d['name']));
   }
 
   /// Push notification token (FCM) server par register karo (app side Phase V7 mein use hoga).
