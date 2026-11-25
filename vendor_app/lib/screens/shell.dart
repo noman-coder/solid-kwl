@@ -17,6 +17,7 @@ import 'order_detail.dart';
 import 'orders.dart';
 import 'pending.dart';
 import 'products.dart';
+import 'rider_cash.dart';
 import 'sales.dart';
 import 'stock.dart';
 
@@ -130,6 +131,10 @@ class _VendorShellState extends State<VendorShell> with WidgetsBindingObserver {
       _state.goTab(2);
       _state.stockChanged(); // lists purani: taza ho jayen
       unawaited(openStockScreen(context)); // seedha Stock screen (kam / khatam list)
+    } else if (t.isRiderCash) {
+      _state.goTab(4);
+      _state.loadDashboard(); // cash badge taza
+      unawaited(openRiderCashScreen(context)); // seedha Rider cash screen (confirm / reject)
     } else {
       _state.goTab(0);
       _state.loadDashboard();

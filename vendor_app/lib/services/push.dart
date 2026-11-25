@@ -46,6 +46,9 @@ class PushTarget {
       orderId > 0 && (type == 'new_order' || type == 'order_cancelled' || type == 'review');
 
   bool get isStock => type == 'low_stock' || type == 'out_of_stock' || type == 'stock_summary';
+
+  /// Rider ne cash handover bheja: tap par Rider cash screen khulni chahiye.
+  bool get isRiderCash => type == 'rider_cash';
 }
 
 /// Push notification (Firebase Cloud Messaging) - Phase V7.

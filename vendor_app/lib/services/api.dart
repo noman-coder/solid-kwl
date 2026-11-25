@@ -9,6 +9,7 @@ import '../models/dashboard.dart';
 import '../models/order_detail.dart';
 import '../models/orders.dart';
 import '../models/products.dart';
+import '../models/rider_cash.dart';
 import '../models/sales.dart';
 import '../models/stock.dart';
 import '../models/vendor.dart';
@@ -437,6 +438,26 @@ class Api {
     final m = RegExp(r'filename="?([^";]+)"?').firstMatch(cd);
     if (m != null && m.group(1)!.trim().isNotEmpty) name = m.group(1)!.trim();
     return ExportFile(resp.bodyBytes, name, fmt == 'pdf' ? 'application/pdf' : 'text/csv');
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V12: Rider cash handover
+  // ------------------------------------------------------------------
+
+  /// Pending (sirf page 1 par) + history + jod. Sirf is vendor ke handovers.
+  static Future<CashPage> riderCash({int page = 1}) async {
+    final d = await _req('GET', '/api/vendor/rider-cash/?page=$page');
+    return CashPage.fromJson(d);
+  }
+
+  /// [action]: confirm | reject. [amount]: jo raqam vendor ne screen par dekhi (badal gayi ho to server rok deta hai).
+  /// Reject par [reason] zaroori.
+  static Future<CashActionResult> riderCashAction(int id, String action, {double? amount, String? reason}) async {
+    final d = await _req('POST', '/api/vendor/rider-cash/$id/$action/', body: {
+      if (amount != null) 'amount': amount,
+      if (reason != null) 'reason': reason,
+    });
+    return CashActionResult.fromJson(d);
   }
 
   // ------------------------------------------------------------------

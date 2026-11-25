@@ -1216,6 +1216,9 @@ urlpatterns = [
      path('api/vendor/sales/statement/', views_vendor_api.api_sales_statement, name='vendor_api_sales_statement'),
      path('api/vendor/sales/orders/', views_vendor_api.api_sales_orders, name='vendor_api_sales_orders'),
      path('api/vendor/sales/export/', views_vendor_api.api_sales_export, name='vendor_api_sales_export'),
+     # Phase V12: rider cash handover (confirm / reject)
+     path('api/vendor/rider-cash/', views_vendor_api.api_rider_cash, name='vendor_api_rider_cash'),
+     path('api/vendor/rider-cash/<int:pk>/<str:action>/', views_vendor_api.api_rider_cash_action, name='vendor_api_rider_cash_action'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

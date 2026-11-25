@@ -477,6 +477,12 @@ class AppState extends ChangeNotifier {
     if (approved) loadDashboard();
   }
 
+  /// Phase V12: Rider cash screen se confirm / reject hua - dashboard ka cash badge aur ginti taza.
+  void cashChanged() {
+    notifyListeners();
+    if (approved) loadDashboard();
+  }
+
   /// Phase V10: Stock screen ko token expire hone par session band karne ke liye.
   Future<void> handleAuthExpired() => _sessionExpired();
 

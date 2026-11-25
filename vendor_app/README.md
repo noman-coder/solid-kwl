@@ -1,7 +1,7 @@
 # Vendor App (Khanewal Connect - Android)
 
 Store owner (vendor) ke liye app. Rider app ke dhanche par bani hai; backend JSON API `api/vendor/...` hai
-(`app/customer/views_vendor_api.py`). Abhi **Phase V11**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)** + **Stock section (kam / khatam list, stock add / kam, kai products ek saath, kam-stock ki hadd, history)** + **Sales tab (bikri, cash vs online, profit, commission, statement, CSV / PDF share)**.
+(`app/customer/views_vendor_api.py`). Abhi **Phase V12**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)** + **Stock section (kam / khatam list, stock add / kam, kai products ek saath, kam-stock ki hadd, history)** + **Sales tab (bikri, cash vs online, profit, commission, statement, CSV / PDF share)** + **Rider cash (rider ka COD cash confirm / reject, history)**.
 Baqi (More ke andar ka kaam) aglay phases mein bharega.
 
 - App ka naam (placeholder): **Vendor App** - `.github/workflows/build_vendor_apk.yml` ke `env: APP_NAME` se badlein (sirf ek jagah).
@@ -77,3 +77,8 @@ Tafseel: `docs/VENDOR_PHASE3.md` (foundation), `docs/VENDOR_PHASE4.md` (dashboar
   kharid rate khali ho to **N/A**. Commission ka tafseeli hisaab, top aur kam chalne wale products, ab tak ka poora hisaab.
 - **Statement:** din wise kamayi (sirf deliver hue orders). **Share:** CSV ya PDF report WhatsApp / email par.
 - Numbers web vendor portal ke Analytics se milte hain. Tafseel + test: `docs/VENDOR_PHASE11.md`.
+
+## Phase V12: Rider cash (More > Rider se cash)
+- Rider COD ka cash vendor ko deta hai aur handover bhejta hai: vendor ko push aata hai (tap = seedha yahi screen). Pending card par raqam, rider ka naam / call, kin orders ka cash.
+- **Confirm** (raqam dobara dikha kar) = rider ka cash-in-hand utna kam; **Reject** (wajah zaroori) = balance wahi, rider ko wajah. Confirm ke baghair balance nahi badalta.
+- History (confirm / reject) aur ab tak mila hua jod. Dashboard par pending cash badge. Tafseel + test: `docs/VENDOR_PHASE12.md`.

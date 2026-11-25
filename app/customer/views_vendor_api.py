@@ -16,6 +16,8 @@ Phase V10: stock tools - stock list (kam / khatam), stock adjust (add / minus + 
 Phase V11: sales tab - sales (summary, COD/online, profit, chart, top/slow), statement (din wise), orders (drill-down),
           export (CSV / PDF). Numbers web ke `_analytics_data` se; profit ke liye Product.purchase_rate (migration 0063,
           khali ho to profit 'N/A'). Add/edit product ab optional `purchase_rate` bhi leta hai.
+Phase V12: rider cash - list (pending + history + jod) aur confirm / reject. Logic `rider_cash_service` ki hai (web wali wahi),
+          confirm par RiderSettlement(cash_in) banti hai; reject par raqam rider ke paas hi rehti hai. Koi migration nahi.
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -53,7 +55,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from ..models import (Brand, Category, DeliveryInfo, Inventory, OrderTracking, Product, RiderCashHandover, RiderProfile, SaleOrder,
-                      Unit, VendorProfile, VendorPushToken, VendorStockLog)
+                      SaleOrderItem, Unit, VendorProfile, VendorPushToken, VendorStockLog)
 from ..vendor_commission import CENT, HUNDRED, commission_percent, vendor_earnings
 from . import store_orders, vendor_stock
 from .views_customer_auth import get_client_ip, normalize_phone
@@ -2047,3 +2049,118 @@ def _sales_pdf(profile, r, pct, rows):
     els.append(t)
     doc.build(els)
     return buf.getvalue()
+
+
+# ================================================================ Phase V12: Rider cash handover
+#
+# Rider COD cash vendor ko deta hai -> vendor app se confirm / reject karta hai. Logic web wali `rider_cash_service`
+# (confirm_handover / reject_handover) hi hai: transaction.atomic + select_for_update, double confirm par sirf ek
+# settlement, confirm ke baghair rider ka balance nahi badalta. Yahan sirf JSON + ownership check hai.
+
+CASH_HISTORY_PAGE_SIZE = 20
+CASH_PENDING_MAX = 100
+CASH_ACTIONS = ('confirm', 'reject')
+
+
+def _cash_summary(vendor):
+    """Ek hi query mein: pending ginti + raqam, confirm ho chuka jod, reject ginti."""
+    agg = RiderCashHandover.objects.filter(receiver='vendor', vendor=vendor).aggregate(
+        p_n=Count('id', filter=Q(status='pending')), p_amt=Sum('amount', filter=Q(status='pending')),
+        c_n=Count('id', filter=Q(status='confirmed')), c_amt=Sum('amount', filter=Q(status='confirmed')),
+        r_n=Count('id', filter=Q(status='rejected')))
+    return {
+        'pending_count': agg['p_n'] or 0, 'pending_amount': _money(agg['p_amt']),
+        'confirmed_count': agg['c_n'] or 0, 'confirmed_total': _money(agg['c_amt']),
+        'rejected_count': agg['r_n'] or 0,
+    }
+
+
+def _cash_json(h):
+    orders = []
+    for d in h.orders.all():
+        so = d.sale_order if d.sale_order_id else None
+        orders.append({'id': d.sale_order_id or 0, 'order_no': so.order_no if so else '',
+                       'cash': _money(d.cash_collected)})
+    rider = h.rider
+    return {
+        'id': h.pk, 'status': h.status, 'amount': _money(h.amount), 'note': h.note,
+        'reject_reason': h.reject_reason,
+        'rider': {'id': rider.pk, 'name': rider.name, 'phone': rider.phone or ''},
+        'orders': orders,
+        'created_at': _iso(h.created_at), 'decided_at': _iso(h.decided_at),
+    }
+
+
+def _cash_qs(vendor):
+    """Sirf is vendor ke (receiver='vendor') handovers."""
+    return (RiderCashHandover.objects.filter(receiver='vendor', vendor=vendor)
+            .select_related('rider').prefetch_related('orders__sale_order'))
+
+
+@vendor_api(['GET'])
+def api_rider_cash(request, profile):
+    """GET /api/vendor/rider-cash/?page=1
+
+    summary + pending (page 1 par, sab, naya pehle) + history (confirm / reject, naya pehle, 20 ek page).
+    Sirf apne handovers; doosre vendor ya admin ke kabhi nahi."""
+    vendor = profile.vendor
+    page = _parse_page(request.GET.get('page'))
+    qs = _cash_qs(vendor)
+    pending = []
+    if page == 1:
+        pending = [_cash_json(h) for h in qs.filter(status='pending').order_by('-created_at')[:CASH_PENDING_MAX]]
+    start = (page - 1) * CASH_HISTORY_PAGE_SIZE
+    rows = list(qs.exclude(status='pending').order_by('-created_at')[start:start + CASH_HISTORY_PAGE_SIZE + 1])
+    has_more = len(rows) > CASH_HISTORY_PAGE_SIZE
+    rows = rows[:CASH_HISTORY_PAGE_SIZE]
+    return JsonResponse({
+        'ok': True, 'page': page, 'has_more': has_more,
+        'summary': _cash_summary(vendor),
+        'pending': pending,
+        'history': [_cash_json(h) for h in rows],
+    })
+
+
+@vendor_api(['POST'])
+def api_rider_cash_action(request, profile, pk, action):
+    """POST /api/vendor/rider-cash/<id>/<confirm|reject>/
+
+    body: {amount?: 1500, reason?: '...'}
+      amount (optional): jo raqam vendor ne screen par dekhi; handover ki raqam isse alag ho to 409 `changed`
+                         (galat raqam confirm na ho).
+      reason: reject par zaroori (max 200).
+    Doosre vendor ka / admin ka handover -> 404. Pehle hi confirm / reject ho chuka -> 409 `handover`."""
+    from .rider_cash_service import HandoverError, confirm_handover, reject_handover
+    if action not in CASH_ACTIONS:
+        return _err('Ghalat action.', 400, code='bad_action')
+    vendor = profile.vendor
+    if not RiderCashHandover.objects.filter(pk=pk, receiver='vendor', vendor=vendor).exists():
+        return _err('Handover nahi mila.', 404, code='not_found')
+    d = _data(request)
+
+    raw_amt = d.get('amount')
+    if raw_amt not in (None, ''):
+        try:
+            seen = Decimal(str(raw_amt).strip().replace(',', '')).quantize(CENT, ROUND_HALF_UP)
+        except Exception:
+            return _err('Raqam sahi nahi.', 400, code='validation')
+        cur = RiderCashHandover.objects.filter(pk=pk).values_list('amount', flat=True).first()
+        if cur is None or seen != Decimal(cur).quantize(CENT, ROUND_HALF_UP):
+            return _err('Raqam badal chuki hai. List taza karke dobara dekhein.', 409, code='changed')
+
+    try:
+        if action == 'confirm':
+            done = confirm_handover(pk, profile.user, vendor=vendor)
+            msg = f'Rider {done.rider.name} se Rs. {done.amount:,.0f} cash mil gaya (confirm).'
+        else:
+            reason = str(d.get('reason') or '').strip()
+            if not reason:
+                return _err('Reject karne ki wajah likhein.', 400, code='validation')
+            done = reject_handover(pk, profile.user, reason, vendor=vendor)
+            msg = f'Handover reject kar diya. Rider {done.rider.name} ko wajah bhej di.'
+    except HandoverError as exc:
+        return _err(str(exc), 409, code='handover')
+
+    fresh = _cash_qs(vendor).get(pk=pk)
+    return JsonResponse({'ok': True, 'message': msg, 'handover': _cash_json(fresh),
+                         'summary': _cash_summary(vendor)})

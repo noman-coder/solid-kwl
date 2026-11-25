@@ -7,8 +7,9 @@ import '../theme.dart';
 import '../utils.dart';
 import '../widgets/section_title.dart';
 import 'permissions_help.dart';
+import 'rider_cash.dart';
 
-/// More tab: store ka chhota card, aglay phases ki list (jald), logout, version.
+/// More tab: store ka chhota card, Rider cash (Phase V12), aglay phases ki list (jald), logout, version.
 class MoreScreen extends StatelessWidget {
   final VoidCallback onLogout;
   const MoreScreen({super.key, required this.onLogout});
@@ -36,6 +37,7 @@ class MoreScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final v = state.vendor;
+    final cashPending = state.dashboard?.riderCash.count ?? 0;
     return RefreshIndicator(
       onRefresh: state.refresh,
       child: ListView(
@@ -45,6 +47,28 @@ class MoreScreen extends StatelessWidget {
           if (v != null) _StoreCard(v: v),
           const SectionTitle('Alerts'),
           const Card(child: _AlertsTile()),
+          const SectionTitle('Paisa'),
+          Card(
+            child: ListTile(
+              onTap: () => openRiderCashScreen(context),
+              leading: Badge(
+                isLabelVisible: cashPending > 0,
+                label: Text('$cashPending'),
+                child: const Icon(Icons.payments_outlined, color: kTeal),
+              ),
+              title: const Text('Rider se cash', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                cashPending > 0
+                    ? 'Confirm karna baqi: ${rs(state.dashboard?.riderCash.amount ?? 0)}'
+                    : 'Rider ka COD cash confirm / reject, history',
+                style: TextStyle(
+                    color: cashPending > 0 ? Colors.amber.shade900 : Colors.black54,
+                    fontSize: 12.5,
+                    fontWeight: cashPending > 0 ? FontWeight.w700 : FontWeight.w400),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+            ),
+          ),
           const SectionTitle('Jald aa raha hai'),
           const Card(
             child: Column(
@@ -52,8 +76,6 @@ class MoreScreen extends StatelessWidget {
                 _SoonTile(icon: Icons.local_offer_outlined, title: 'Coupons & offers'),
                 Divider(height: 1),
                 _SoonTile(icon: Icons.star_outline, title: 'Reviews'),
-                Divider(height: 1),
-                _SoonTile(icon: Icons.payments_outlined, title: 'Rider cash'),
                 Divider(height: 1),
                 _SoonTile(icon: Icons.storefront_outlined, title: 'Store settings'),
                 Divider(height: 1),

@@ -11,6 +11,7 @@ import '../widgets/section_title.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/week_chart.dart';
+import 'rider_cash.dart';
 
 /// Dashboard tab: salam + store naam + Open/Closed switch, alerts, aaj / hafta / mahina ki sale,
 /// orders, earnings, rating, products / stock, rider cash, 7 din ka chart, quick actions.
@@ -205,7 +206,9 @@ class DashboardScreen extends StatelessWidget {
             ),
             title: Text('Rider cash confirm karna baqi: ${rs(d.riderCash.amount)}',
                 style: const TextStyle(fontWeight: FontWeight.w800)),
-            subtitle: const Text('Cash screen jald aa rahi hai'),
+            subtitle: const Text('Dekhein aur confirm / reject karein'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openRiderCashScreen(context),
           ),
         ));
     }
