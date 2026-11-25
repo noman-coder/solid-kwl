@@ -7,6 +7,7 @@ Phase V4: dashboard (aaj/hafta/mahina sale, orders, earnings, stock, 7-din chart
 Phase V5: orders tab - list (Naye / Chal rahe / Mukammal + search + page), action (accept/reject/ready/delivered), poll.
 Phase V6: order detail (items + images, customer, payment, status steps, rider, commission), live track (rider ki location),
           assign-rider (list + assign).
+Phase V8: products tab - list (search/filter/page), toggle (shop par show/hide), quick-update (rate/discount/naya stock).
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -31,7 +32,8 @@ from django.core import signing
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Case, Count, F, FloatField, OuterRef, Q, Subquery, Sum, Value, When
+from django.db.models.functions import Coalesce
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -39,7 +41,7 @@ from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from ..models import (DeliveryInfo, OrderTracking, Product, RiderCashHandover, RiderProfile, SaleOrder,
+from ..models import (DeliveryInfo, Inventory, OrderTracking, Product, RiderCashHandover, RiderProfile, SaleOrder,
                       VendorProfile, VendorPushToken)
 from ..vendor_commission import CENT, HUNDRED, commission_percent, vendor_earnings
 from . import store_orders
@@ -48,7 +50,7 @@ from .views_reviews import vendor_rating
 from .views_vendor_portal import (
     LOGIN_LOCK_SECONDS, LOGIN_MAX_ATTEMPTS, ORDER_TABS, _login_key, _stock_warehouse,
 )
-from .views_vendor_tools import _analytics_data, _stock_rows
+from .views_vendor_tools import LOW_STOCK_DEFAULT, _analytics_data, _stock_rows, quick_update_product
 
 logger = logging.getLogger(__name__)
 
@@ -858,3 +860,251 @@ def api_assign_rider(request, profile, pk):
     fresh = _fresh_order(pk, profile.vendor)
     return JsonResponse({'ok': True, 'message': f'Order #{fresh.order_no}: rider {rider.name} ko de diya.',
                          'order': _detail_json(profile, fresh), 'counts': _tab_counts(profile.vendor)})
+
+
+# ================================================================
+# Phase V8 - Products tab (list + toggle + quick update)
+# Naya business logic nahi: stock/low ki shart web `_stock_rows` wali hai (approved aur stock <= threshold,
+# threshold 0/khali ho to 10), quick-update `views_vendor_tools.quick_update_product` (web wali SHARED logic),
+# toggle web `vendor_product_toggle` ka rule (sirf approved). Har query vendor=profile.vendor tak mehdood.
+# ================================================================
+
+PRODUCTS_PAGE_SIZE = 20
+PRODUCT_STATUSES = ('approved', 'pending', 'rejected')
+PRODUCT_STOCK_FILTERS = ('low', 'out')
+QUICK_UPDATE_MAX_ITEMS = 50
+
+
+def _product_qs(vendor):
+    """Vendor ke products + stock (shop wali warehouse) + threshold, ek hi query mein (N+1 nahi)."""
+    wh = _stock_warehouse()
+    if wh:
+        stock_sq = (Inventory.objects.filter(product=OuterRef('pk'), warehouse=wh)
+                    .order_by().values('stock')[:1])
+        stk = Coalesce(Subquery(stock_sq, output_field=FloatField()), Value(0.0), output_field=FloatField())
+    else:
+        stk = Value(0.0, output_field=FloatField())
+    thr = Case(When(low_stock_threshold__isnull=True, then=Value(float(LOW_STOCK_DEFAULT))),
+               When(low_stock_threshold=0, then=Value(float(LOW_STOCK_DEFAULT))),
+               default=F('low_stock_threshold'), output_field=FloatField())
+    return (Product.objects.filter(vendor=vendor)
+            .select_related('category', 'unit')
+            .annotate(stk=stk, thr=thr))
+
+
+def _stock_state(approval_status, stock, threshold):
+    """'out' (khatam) | 'low' (kam) | 'ok'. Sirf approved product par (dashboard jaisa)."""
+    if approval_status != 'approved':
+        return 'ok'
+    if stock <= 0:
+        return 'out'
+    return 'low' if stock <= threshold else 'ok'
+
+
+def _product_json(p):
+    stock = float(getattr(p, 'stk', 0) or 0)
+    thr = float(getattr(p, 'thr', LOW_STOCK_DEFAULT) or LOW_STOCK_DEFAULT)
+    approved = p.approval_status == 'approved'
+    original = p.original_price if p.original_price and p.original_price > 0 else p.price
+    return {
+        'id': p.pk,
+        'name': p.name,
+        'image': _media_url(p.image),
+        'category': p.category.name if p.category_id else '',
+        'unit': p.unit.name if p.unit_id else '',
+        'barcode': p.barcode or '',
+        'price': _money(p.price),                       # customer ko jo rate dikhta hai (discount ke baad)
+        'original_price': _money(original),             # discount se pehle ka rate (quick edit isi ko badalta hai)
+        'discount_percent': _money(p.discount_percentage),
+        'stock': _qty(stock),
+        'low_threshold': _qty(thr),
+        'stock_state': _stock_state(p.approval_status, stock, thr),
+        'approval_status': p.approval_status,
+        'rejection_reason': (p.rejection_reason or '') if p.approval_status == 'rejected' else '',
+        'is_active': bool(p.is_active),
+        'visible': bool(approved and p.is_active),      # customer ko nazar aa raha hai?
+        'can_toggle': approved,
+        'can_edit_price': True,
+    }
+
+
+def _product_counts(vendor):
+    """Chips ke badge: sab / approved / pending / rejected / kam stock / khatam (dashboard ke numbers ke barabar)."""
+    rows = _product_qs(vendor).values('approval_status', 'stk', 'thr')
+    c = {'all': 0, 'approved': 0, 'pending': 0, 'rejected': 0, 'low': 0, 'out': 0}
+    for r in rows:
+        c['all'] += 1
+        c[r['approval_status']] = c.get(r['approval_status'], 0) + 1
+        state = _stock_state(r['approval_status'], r['stk'] or 0, r['thr'] or LOW_STOCK_DEFAULT)
+        if state in ('low', 'out'):
+            c[state] += 1
+    return c
+
+
+@vendor_api(['GET'])
+def api_products(request, profile):
+    """GET /api/vendor/products/?q=&status=approved|pending|rejected&stock=low|out&page=1
+
+    q: naam ya barcode. stock=low -> kam stock (>0 aur threshold tak), stock=out -> khatam. Page 20 ka; `has_more`.
+    Ghalat status/stock value chupchap ignore (sab dikhao).
+    """
+    vendor = profile.vendor
+    q = (request.GET.get('q') or '').strip()[:60]
+    status = request.GET.get('status', '')
+    stock = request.GET.get('stock', '')
+    page = _parse_page(request.GET.get('page'))
+
+    qs = _product_qs(vendor)
+    if q:
+        qs = qs.filter(Q(name__icontains=q) | Q(barcode__icontains=q))
+    if status in PRODUCT_STATUSES:
+        qs = qs.filter(approval_status=status)
+    if stock == 'out':
+        qs = qs.filter(approval_status='approved', stk__lte=0)
+    elif stock == 'low':
+        qs = qs.filter(approval_status='approved', stk__gt=0, stk__lte=F('thr'))
+    else:
+        stock = ''
+    qs = qs.order_by('stk', 'name', 'pk') if stock else qs.order_by('-pk')
+
+    start = (page - 1) * PRODUCTS_PAGE_SIZE
+    rows = list(qs[start:start + PRODUCTS_PAGE_SIZE + 1])
+    has_more = len(rows) > PRODUCTS_PAGE_SIZE
+    rows = rows[:PRODUCTS_PAGE_SIZE]
+    return JsonResponse({
+        'ok': True,
+        'generated_at': now().isoformat(),
+        'page': page,
+        'has_more': has_more,
+        'q': q,
+        'status': status if status in PRODUCT_STATUSES else '',
+        'stock': stock,
+        'counts': _product_counts(vendor),
+        'products': [_product_json(p) for p in rows],
+    })
+
+
+def _fresh_product(vendor, pk):
+    return _product_qs(vendor).filter(pk=pk).first()
+
+
+@vendor_api(['POST'])
+def api_product_toggle(request, profile, pk):
+    """POST /api/vendor/products/<id>/toggle/   body (optional): {active: true|false}
+
+    Web `vendor_product_toggle` ka rule: sirf approved product shop par show/hide hota hai (delete nahi).
+    `active` bheja ho to wahi set hota hai (double tap/do phone se ulta na ho), warna ulta kar deta hai.
+    Doosre vendor ka product -> 404.
+    """
+    vendor = profile.vendor
+    d = _data(request)
+    raw = d.get('active')
+    if isinstance(raw, str):
+        raw = raw.strip().lower()
+    want = True if raw in _TRUE else False if raw in _FALSE else None
+
+    with transaction.atomic():
+        product = Product.objects.select_for_update().filter(pk=pk, vendor=vendor).first()
+        if product is None:
+            return _err('Ye product nahi mila.', 404, code='not_found')
+        if product.approval_status != 'approved':
+            return _err('Sirf approved product show/hide ho sakta hai.', 409, code='not_approved')
+        new_state = (not product.is_active) if want is None else want
+        if new_state != product.is_active:
+            Product.objects.filter(pk=product.pk).update(is_active=new_state)
+    fresh = _fresh_product(vendor, pk)
+    msg = 'Product ab shop par nazar aayega.' if new_state else 'Product shop se chhupa diya.'
+    return JsonResponse({'ok': True, 'message': msg, 'product': _product_json(fresh),
+                         'counts': _product_counts(vendor)})
+
+
+def _quick_items(d):
+    """Body se items: {items:[{id, price, discount?, add?}]} ya ek product ka seedha {id, price, ...}."""
+    items = d.get('items')
+    if items is None and d.get('id') is not None:
+        items = [d]
+    if not isinstance(items, list):
+        return None
+    return items
+
+
+def _raw(v):
+    """JSON number/string dono ko web form jaisi string banao (Decimal parsing wahi chale)."""
+    if v is None:
+        return ''
+    if isinstance(v, bool):
+        return 'x'
+    return str(v).strip()
+
+
+@vendor_api(['POST'])
+def api_products_quick_update(request, profile):
+    """POST /api/vendor/products/quick-update/
+
+    Body: {items: [{id, price, discount (0-90, optional), add (naya stock, optional)}]}  (ek product ho to seedha
+    {id, price, ...} bhi chalta hai). Validation aur kaam bilkul web quick-update wala
+    (`quick_update_product`): price > 0, discount 0-90, add 0..1,000,000, batch repricing, transaction.atomic.
+    Price na bheji ho to product ki maujooda original price hi rakhi jati hai (sirf stock add karna ho to).
+    Har product alag: ek ghalat ho to baqi phir bhi save hote hain; `results` mein har ek ka nateeja.
+    """
+    vendor = profile.vendor
+    d = _data(request)
+    items = _quick_items(d)
+    if not items:
+        return _err('Koi product nahi bheja.', 400, code='no_items')
+    if len(items) > QUICK_UPDATE_MAX_ITEMS:
+        return _err(f'Ek baar mein {QUICK_UPDATE_MAX_ITEMS} se zyada products nahi.', 400, code='too_many')
+
+    pct = commission_percent(profile)
+    warehouse = _stock_warehouse()
+    results, changed, errors = [], 0, []
+    seen = set()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        try:
+            pid = int(it.get('id'))
+        except (TypeError, ValueError):
+            continue
+        if pid in seen:
+            continue
+        seen.add(pid)
+        product = Product.objects.filter(pk=pid, vendor=vendor).first()
+        if product is None:                        # doosre vendor ka / maujood nahi: chupchap error, leak nahi
+            results.append({'id': pid, 'status': 'error', 'error': 'Ye product nahi mila.'})
+            errors.append('Ye product nahi mila.')
+            continue
+        price_raw = _raw(it.get('price'))
+        if not price_raw:
+            price_raw = str(product.original_price if product.original_price and product.original_price > 0
+                            else product.price)
+        discount_raw = _raw(it['discount']) if 'discount' in it else str(product.discount_percentage or 0)
+        status, errs = quick_update_product(product, price_raw, discount_raw, _raw(it.get('add')) or '0',
+                                            pct, vendor, warehouse)
+        row = {'id': pid, 'status': status}
+        if status == 'error':
+            row['error'] = errs[0] if errs else 'Update nahi ho saka.'
+            errors.extend(errs)
+        elif status == 'changed':
+            changed += 1
+        results.append(row)
+
+    fresh = {p.pk: p for p in _product_qs(vendor).filter(pk__in=[r['id'] for r in results])}
+    for r in results:
+        if r['id'] in fresh:
+            r['product'] = _product_json(fresh[r['id']])
+
+    if changed and not errors:
+        msg = f'{changed} product update ho gaya.' if changed == 1 else f'{changed} products update ho gaye.'
+    elif changed:
+        msg = f'{changed} update hue, {len(errors)} mein masla.'
+    elif errors:
+        msg = errors[0]
+    else:
+        msg = 'Koi tabdeeli nahi mili.'
+    out = {'ok': bool(changed) or not errors, 'message': msg, 'changed': changed,
+           'results': results, 'counts': _product_counts(vendor)}
+    if not out['ok']:
+        out['error'] = msg
+        return JsonResponse(out, status=400)
+    return JsonResponse(out)

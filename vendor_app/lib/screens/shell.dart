@@ -17,9 +17,10 @@ import 'order_detail.dart';
 import 'orders.dart';
 import 'pending.dart';
 import 'placeholder_tab.dart';
+import 'products.dart';
 
 /// Login ke baad ka main screen: 5 tabs (Dashboard, Orders, Products, Sales, More).
-/// Approval baqi ho to sirf PendingScreen. Dashboard (V4) aur Orders (V5) tabs bhar chuke hain; baqi tabs
+/// Approval baqi ho to sirf PendingScreen. Dashboard (V4), Orders (V5) aur Products (V8) tabs bhar chuke hain; baqi tabs
 /// "jald aa raha hai" hain - aglay phases mein bharte jayenge.
 /// Phase V7: push (token register, banner, notification tap -> order detail) yahin se judta hai.
 class VendorShell extends StatefulWidget {
@@ -214,7 +215,7 @@ class _VendorShellState extends State<VendorShell> with WidgetsBindingObserver {
               children: [
                 const DashboardScreen(),
                 const OrdersScreen(),
-                const PlaceholderTab(icon: Icons.inventory_2_outlined, title: 'Products'),
+                const ProductsScreen(),
                 const PlaceholderTab(icon: Icons.bar_chart_rounded, title: 'Sales'),
                 MoreScreen(onLogout: widget.onLogout),
               ],

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/dashboard.dart';
 import '../models/order_detail.dart';
 import '../models/orders.dart';
+import '../models/products.dart';
 import '../models/vendor.dart';
 import '../utils.dart';
 
@@ -251,6 +252,51 @@ class Api {
   static Future<({String message, OrderDetail detail})> assignRider(int orderId, int riderId) async {
     final d = await _req('POST', '/api/vendor/orders/$orderId/assign-rider/', body: {'rider_id': riderId});
     return (message: s(d['message']), detail: OrderDetail.fromJson(asMap(d['order'])));
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V8: Products
+  // ------------------------------------------------------------------
+
+  /// Products ka ek page. [filter]: all | approved | pending | rejected | low | out, [q]: naam / barcode.
+  static Future<ProductsPage> products(String filter, {int page = 1, String q = ''}) async {
+    final params = <String, String>{'page': '$page'};
+    if (filter == 'approved' || filter == 'pending' || filter == 'rejected') params['status'] = filter;
+    if (filter == 'low' || filter == 'out') params['stock'] = filter;
+    final query = q.trim();
+    if (query.isNotEmpty) params['q'] = query;
+    final qs = Uri(queryParameters: params).query;
+    final d = await _req('GET', '/api/vendor/products/?$qs');
+    return ProductsPage.fromJson(d);
+  }
+
+  /// Product shop par dikhao / chhupao. [active] bheja ho to wahi set hota hai (double tap se ulta nahi hota).
+  static Future<ProductChange> toggleProduct(int id, {bool? active}) async {
+    final d = await _req('POST', '/api/vendor/products/$id/toggle/',
+        body: {if (active != null) 'active': active});
+    return ProductChange.fromJson(d);
+  }
+
+  /// Rate / discount / naya stock (web quick-update jaisi validation). Sirf wohi cheez bhejein jo badalni ho.
+  static Future<ProductChange> quickUpdateProduct(int id,
+      {double? price, double? discount, double? addStock}) async {
+    final d = await _req('POST', '/api/vendor/products/quick-update/', body: {
+      'items': [
+        {
+          'id': id,
+          if (price != null) 'price': price,
+          if (discount != null) 'discount': discount,
+          if (addStock != null && addStock > 0) 'add': addStock,
+        }
+      ],
+    });
+    final results = listOfMaps(d['results']);
+    final first = results.isEmpty ? <String, dynamic>{} : results.first;
+    return ProductChange(
+      s(d['message']),
+      first['product'] is Map ? VendorProduct.fromJson(asMap(first['product'])) : null,
+      countsFrom(d['counts']),
+    );
   }
 
   /// Push notification token (FCM) server par register karo (app side Phase V7 mein use hoga).

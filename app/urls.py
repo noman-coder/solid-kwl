@@ -1198,6 +1198,10 @@ urlpatterns = [
      path('api/vendor/orders/<int:pk>/track/', views_vendor_api.api_order_track, name='vendor_api_order_track'),
      path('api/vendor/orders/<int:pk>/assign-rider/', views_vendor_api.api_assign_rider, name='vendor_api_assign_rider'),
      path('api/vendor/orders/<int:pk>/<str:action>/', views_vendor_api.api_order_action, name='vendor_api_order_action'),
+     # ---- Phase V8: products tab (quick-update/ ko <int:pk> wale route se pehle rakha hai) ----
+     path('api/vendor/products/', views_vendor_api.api_products, name='vendor_api_products'),
+     path('api/vendor/products/quick-update/', views_vendor_api.api_products_quick_update, name='vendor_api_products_quick_update'),
+     path('api/vendor/products/<int:pk>/toggle/', views_vendor_api.api_product_toggle, name='vendor_api_product_toggle'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

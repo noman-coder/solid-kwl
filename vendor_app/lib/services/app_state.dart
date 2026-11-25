@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../models/dashboard.dart';
 import '../models/orders.dart';
+import '../models/products.dart';
 import '../models/vendor.dart';
 import 'api.dart';
 import 'push.dart';
@@ -26,6 +27,19 @@ class OrderList {
   bool loadingMore = false; // agla page load ho raha hai
   String? error; // aakhri koshish nakam hui (internet / server)
   int seq = 0; // sirf sab se nayi request apply hoti hai
+}
+
+/// Products ki list (ek filter chip ki) aur uski haalat.
+class ProductList {
+  List<VendorProduct> products = [];
+  int page = 0;
+  bool hasMore = false;
+  bool loaded = false;
+  bool stale = false;
+  bool loading = false;
+  bool loadingMore = false;
+  String? error;
+  int seq = 0;
 }
 
 /// Poore app ka shared hissa: vendor ka profile / approval status, tab navigation aur dashboard.
@@ -75,6 +89,13 @@ class AppState extends ChangeNotifier {
   int _lastLatestId = -1; // -1 = abhi baseline nahi bana
   int _alertedId = 0; // sab se naya order jis ki awaaz / banner ho chuka (push + poll dono ek hi baar bajayen)
 
+  // ---- Phase V8: Products
+  final Map<String, ProductList> _productLists = {for (final f in kProductFilters) f: ProductList()};
+  Map<String, int>? productCounts; // chips ke badge (server se)
+  String productsQuery = ''; // search (naam / barcode)
+  String productFilter = 'all'; // abhi kaun sa chip chuna hai
+  final Set<int> productBusy = <int>{}; // jin products par toggle / update chal raha hai (double-tap lock)
+
   final StreamController<AppEvent> _events = StreamController<AppEvent>.broadcast();
   Stream<AppEvent> get events => _events.stream;
 
@@ -121,7 +142,7 @@ class AppState extends ChangeNotifier {
 
   /// Pull-to-refresh / app resume: profile + dashboard + orders.
   Future<void> refreshAll() async {
-    await Future.wait([refresh(), loadDashboard(), refreshOrders()]);
+    await Future.wait([refresh(), loadDashboard(), refreshOrders(), if (productList(productFilter).loaded) refreshProducts()]);
   }
 
   /// Dashboard dobara lo. Net na ho to purana data rehta hai aur `dashError` set hota hai.
@@ -341,6 +362,209 @@ class AppState extends ChangeNotifier {
     if (next != null) loadDashboard(); // dashboard ke numbers badal gaye
     if (recheck) loadOrders(o.tab);
     return next;
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V8: Products
+  // ------------------------------------------------------------------
+
+  ProductList productList(String filter) => _productLists[filter] ?? _productLists['all']!;
+
+  /// Chip pehli dafa khuli ho ya purani (stale) ho to load karo.
+  void ensureProducts([String? filter]) {
+    final l = productList(filter ?? productFilter);
+    if ((!l.loaded || l.stale) && !l.loading) loadProducts(filter ?? productFilter);
+  }
+
+  /// Chip badlo (list turant, load ho chuki ho to).
+  void setProductFilter(String f) {
+    if (!kProductFilters.contains(f) || f == productFilter) return;
+    productFilter = f;
+    notifyListeners();
+    ensureProducts(f);
+  }
+
+  /// Chip ka pehla page. Net na ho to purani list rehti hai aur `error` set hota hai.
+  Future<void> loadProducts([String? filter]) async {
+    if (!approved) return;
+    final f = filter ?? productFilter;
+    final l = productList(f);
+    final seq = ++l.seq;
+    l.stale = false;
+    l.loadingMore = false;
+    if (!l.loaded) {
+      l.loading = true;
+      notifyListeners();
+    }
+    try {
+      final p = await Api.products(f, q: productsQuery);
+      if (_disposed || seq != l.seq) return;
+      l.products = p.products;
+      l.page = p.page;
+      l.hasMore = p.hasMore;
+      l.loaded = true;
+      l.error = null;
+      productCounts = p.counts;
+    } on ApiException catch (e) {
+      if (_disposed || seq != l.seq) return;
+      if (e.authExpired) {
+        l.loading = false;
+        await _sessionExpired();
+        return;
+      }
+      if (e.pending) {
+        l.loading = false;
+        await refresh();
+        return;
+      }
+      l.error = e.message;
+    }
+    l.loading = false;
+    notifyListeners();
+  }
+
+  Future<void> loadMoreProducts([String? filter]) async {
+    final f = filter ?? productFilter;
+    final l = productList(f);
+    if (!approved || !l.loaded || !l.hasMore || l.loading || l.loadingMore) return;
+    final seq = l.seq;
+    l.loadingMore = true;
+    notifyListeners();
+    try {
+      final p = await Api.products(f, page: l.page + 1, q: productsQuery);
+      if (_disposed || seq != l.seq) return;
+      final seen = l.products.map((e) => e.id).toSet();
+      l.products = [...l.products, ...p.products.where((e) => !seen.contains(e.id))];
+      l.page = p.page;
+      l.hasMore = p.hasMore;
+      productCounts = p.counts;
+    } on ApiException catch (e) {
+      if (_disposed || seq != l.seq) return;
+      if (e.authExpired) {
+        l.loadingMore = false;
+        await _sessionExpired();
+        return;
+      }
+      toast(e.message);
+    }
+    l.loadingMore = false;
+    notifyListeners();
+  }
+
+  /// Search badli: saare chips purane ho gaye, khula hua chip foran dobara load hota hai.
+  Future<void> setProductsQuery(String q) async {
+    final nq = q.trim();
+    if (nq == productsQuery) return;
+    productsQuery = nq;
+    for (final f in kProductFilters) {
+      final l = productList(f);
+      l.seq++;
+      l.loading = false;
+      l.loaded = false;
+      l.stale = true;
+      l.loadingMore = false;
+    }
+    await loadProducts(productFilter);
+  }
+
+  /// Pull-to-refresh / app resume: khula chip taza, baqi agli dafa khulne par.
+  Future<void> refreshProducts() async {
+    if (!approved) return;
+    for (final f in kProductFilters) {
+      if (f != productFilter && productList(f).loaded) productList(f).stale = true;
+    }
+    await loadProducts(productFilter);
+  }
+
+  /// Ek product ka taza roop saari lists mein badlo (chip ke hisaab se jo ab us list mein nahi banta use hatao).
+  void _applyProduct(VendorProduct p) {
+    for (final f in kProductFilters) {
+      final l = productList(f);
+      final i = l.products.indexWhere((e) => e.id == p.id);
+      if (i < 0) continue;
+      final stillHere = switch (f) {
+        'approved' => p.isApproved,
+        'pending' => p.isPending,
+        'rejected' => p.isRejected,
+        'low' => p.isApproved && p.stockState == 'low',
+        'out' => p.isApproved && p.stockState == 'out',
+        _ => true,
+      };
+      if (stillHere) {
+        l.products[i] = p;
+      } else {
+        l.products.removeAt(i);
+      }
+    }
+  }
+
+  /// Shop par show/hide. Kamyab ho to true. Jab tak chal raha ho dobara tap kuch nahi karta.
+  Future<bool> toggleProduct(VendorProduct p, {required bool active}) async {
+    if (productBusy.contains(p.id)) return false;
+    productBusy.add(p.id);
+    notifyListeners();
+    var ok = false;
+    try {
+      final r = await Api.toggleProduct(p.id, active: active);
+      if (_disposed) return false;
+      if (r.product != null) _applyProduct(r.product!);
+      productCounts = r.counts;
+      if (r.message.isNotEmpty) toast(r.message);
+      ok = true;
+    } on ApiException catch (e) {
+      if (_disposed) return false;
+      if (e.authExpired) {
+        productBusy.remove(p.id);
+        await _sessionExpired();
+        return false;
+      }
+      if (e.pending) {
+        productBusy.remove(p.id);
+        await refresh();
+        return false;
+      }
+      toast(e.message);
+      if (e.code == 'not_approved' || e.code == 'not_found') productList(productFilter).stale = true;
+    }
+    productBusy.remove(p.id);
+    notifyListeners();
+    if (ok) loadDashboard(); // dashboard ke numbers
+    if (productList(productFilter).stale) loadProducts();
+    return ok;
+  }
+
+  /// Rate / discount / naya stock. Kamyab ho to null, warna server ka saaf message (sheet mein dikhane ke liye).
+  Future<String?> quickUpdateProduct(VendorProduct p, {double? price, double? discount, double? addStock}) async {
+    if (productBusy.contains(p.id)) return 'Update chal raha hai, zara ruken.';
+    productBusy.add(p.id);
+    notifyListeners();
+    String? err;
+    var changed = false;
+    try {
+      final r = await Api.quickUpdateProduct(p.id, price: price, discount: discount, addStock: addStock);
+      if (_disposed) return null;
+      if (r.product != null) _applyProduct(r.product!);
+      productCounts = r.counts;
+      if (r.message.isNotEmpty) toast(r.message);
+      changed = true;
+    } on ApiException catch (e) {
+      if (_disposed) return null;
+      if (e.authExpired) {
+        productBusy.remove(p.id);
+        await _sessionExpired();
+        return null;
+      }
+      if (e.pending) {
+        productBusy.remove(p.id);
+        await refresh();
+        return null;
+      }
+      err = e.message;
+    }
+    productBusy.remove(p.id);
+    notifyListeners();
+    if (changed) loadDashboard(); // stock / low-stock ginti badal sakti hai
+    return err;
   }
 
   /// Detail screen jaisi jagah se aaya ApiException: session khatam / approval hat gayi ho to yahin sambhal lo
