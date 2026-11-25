@@ -533,13 +533,14 @@ jobs:
           pkill -f "gunicorn" || true
           pkill -f "manage.py runserver" || true
           pkill -f "cloudflared" || true
-          pkill -f "periodic_snapshot" || true
+     #     pkill -f "periodic_snapshot" || true
+      #    pkill -f "periodic_snapshot
           sleep 2
 
       - name: Start Gunicorn, Health Check & Auto-Restarting Cloudflare Tunnel
         if: env.STOP_AFTER_MIGRATE != 'true'
         run: |
-          touch gunicorn.log tunnel.log periodic_snapshot.log
+#          touch gunicorn.log tunnel.log periodic_snapshot.log
 
           setsid nohup gunicorn P1.wsgi:application \
             --bind 127.0.0.1:8000 \
@@ -578,12 +579,6 @@ jobs:
             done
           ' > /dev/null 2>&1 < /dev/null &
 
-          setsid nohup bash -c '
-            while true; do
-              sleep 1800
-              bash "$HELPER_DIR/snapshot.sh" periodic
-            done
-          ' >> periodic_snapshot.log 2>&1 < /dev/null &
 
           sleep 4
           echo "=== GUNICORN & AUTO-RESTARTING CLOUDFLARE TUNNEL LIVE ==="
@@ -632,7 +627,7 @@ jobs:
           pkill -f "cloudflared" || true
           pkill -f "gunicorn" || true
           pkill -f "manage.py runserver" || true
-          pkill -f "periodic_snapshot" || true
+     #     pkill -f "periodic_snapshot" || true
           pkill -f "snapshot.sh" || true
           sleep 3
           bash "$HELPER_DIR/snapshot.sh" final
