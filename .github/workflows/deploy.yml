@@ -572,7 +572,7 @@ jobs:
           setsid nohup bash -c '
             while true; do
               echo "[$(date -u +"%Y-%m-%d %H:%M:%S UTC")] Starting cloudflared tunnel..." >> tunnel.log
-              cloudflared tunnel run --token "$CLOUDFLARE_TOKEN" >> tunnel.log 2>&1
+              cloudflared tunnel --protocol http2 run --token "$CLOUDFLARE_TOKEN" >> tunnel.log 2>&1
               EXIT_CODE=$?
               echo "[$(date -u +"%Y-%m-%d %H:%M:%S UTC")] cloudflared exited with code $EXIT_CODE. Restarting in 3s..." >> tunnel.log
               sleep 3
