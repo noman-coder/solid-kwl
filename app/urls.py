@@ -1219,6 +1219,11 @@ urlpatterns = [
      # Phase V12: rider cash handover (confirm / reject)
      path('api/vendor/rider-cash/', views_vendor_api.api_rider_cash, name='vendor_api_rider_cash'),
      path('api/vendor/rider-cash/<int:pk>/<str:action>/', views_vendor_api.api_rider_cash_action, name='vendor_api_rider_cash_action'),
+     # Phase V13: coupons (list / create / edit / toggle / delete)
+     path('api/vendor/coupons/', views_vendor_api.api_coupons, name='vendor_api_coupons'),
+     path('api/vendor/coupons/<int:pk>/', views_vendor_api.api_coupon_edit, name='vendor_api_coupon_edit'),
+     path('api/vendor/coupons/<int:pk>/toggle/', views_vendor_api.api_coupon_toggle, name='vendor_api_coupon_toggle'),
+     path('api/vendor/coupons/<int:pk>/delete/', views_vendor_api.api_coupon_delete, name='vendor_api_coupon_delete'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

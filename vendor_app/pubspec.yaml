@@ -1,7 +1,7 @@
 name: kconn_vendor
 description: Khanewal Connect Vendor app (store owner ke liye)
 publish_to: 'none'
-version: 0.12.0+13
+version: 0.13.0+14
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

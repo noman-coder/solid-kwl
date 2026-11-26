@@ -6,10 +6,11 @@ import '../services/push.dart';
 import '../theme.dart';
 import '../utils.dart';
 import '../widgets/section_title.dart';
+import 'coupons.dart';
 import 'permissions_help.dart';
 import 'rider_cash.dart';
 
-/// More tab: store ka chhota card, Rider cash (Phase V12), aglay phases ki list (jald), logout, version.
+/// More tab: store ka chhota card, Rider cash (Phase V12), Coupons (Phase V13), aglay phases ki list (jald), logout, version.
 class MoreScreen extends StatelessWidget {
   final VoidCallback onLogout;
   const MoreScreen({super.key, required this.onLogout});
@@ -69,12 +70,21 @@ class MoreScreen extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right),
             ),
           ),
+          const SectionTitle('Promotion'),
+          Card(
+            child: ListTile(
+              onTap: () => openCouponsScreen(context),
+              leading: const Icon(Icons.local_offer_outlined, color: kTeal),
+              title: const Text('Coupons', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Customers ke liye coupon banayein, chalu / band karein, share karein',
+                  style: TextStyle(color: Colors.black54, fontSize: 12.5)),
+              trailing: const Icon(Icons.chevron_right),
+            ),
+          ),
           const SectionTitle('Jald aa raha hai'),
           const Card(
             child: Column(
               children: [
-                _SoonTile(icon: Icons.local_offer_outlined, title: 'Coupons & offers'),
-                Divider(height: 1),
                 _SoonTile(icon: Icons.star_outline, title: 'Reviews'),
                 Divider(height: 1),
                 _SoonTile(icon: Icons.storefront_outlined, title: 'Store settings'),

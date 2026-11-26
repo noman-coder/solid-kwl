@@ -1,7 +1,7 @@
 # Vendor App (Khanewal Connect - Android)
 
 Store owner (vendor) ke liye app. Rider app ke dhanche par bani hai; backend JSON API `api/vendor/...` hai
-(`app/customer/views_vendor_api.py`). Abhi **Phase V12**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)** + **Stock section (kam / khatam list, stock add / kam, kai products ek saath, kam-stock ki hadd, history)** + **Sales tab (bikri, cash vs online, profit, commission, statement, CSV / PDF share)** + **Rider cash (rider ka COD cash confirm / reject, history)**.
+(`app/customer/views_vendor_api.py`). Abhi **Phase V13 (coupons)**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)** + **Stock section (kam / khatam list, stock add / kam, kai products ek saath, kam-stock ki hadd, history)** + **Sales tab (bikri, cash vs online, profit, commission, statement, CSV / PDF share)** + **Rider cash (rider ka COD cash confirm / reject, history)** + **Coupons (banao / badlo / chalu-band / delete, preview, WhatsApp share)**.
 Baqi (More ke andar ka kaam) aglay phases mein bharega.
 
 - App ka naam (placeholder): **Vendor App** - `.github/workflows/build_vendor_apk.yml` ke `env: APP_NAME` se badlein (sirf ek jagah).
@@ -82,3 +82,9 @@ Tafseel: `docs/VENDOR_PHASE3.md` (foundation), `docs/VENDOR_PHASE4.md` (dashboar
 - Rider COD ka cash vendor ko deta hai aur handover bhejta hai: vendor ko push aata hai (tap = seedha yahi screen). Pending card par raqam, rider ka naam / call, kin orders ka cash.
 - **Confirm** (raqam dobara dikha kar) = rider ka cash-in-hand utna kam; **Reject** (wajah zaroori) = balance wahi, rider ko wajah. Confirm ke baghair balance nahi badalta.
 - History (confirm / reject) aur ab tak mila hua jod. Dashboard par pending cash badge. Tafseel + test: `docs/VENDOR_PHASE12.md`.
+
+## Phase V13: Coupons (More > Promotion > Coupons)
+- Apne store ke coupons: percent / Rs off / free delivery, kam az kam order, kul istemal ki hadd, har customer ki hadd, sirf pehla order, shuru / khatam ki tareekh. Banate waqt **preview** ("Customer ko aise dikhega").
+- Card par usage bar, ab tak di gayi chhoot, **chalu / band switch**, code copy, **WhatsApp share**. Istemal ho chuka coupon delete nahi hota (band hota hai) aur uska code / qism / value badal nahi sakta.
+- Validation aur checkout web wala hi (`_clean_vendor_coupon`, `coupons.evaluate`). **Offers (V13-B) abhi nahi** - woh alag sub-step hai (migration 0064).
+- Sust net / VPN par GET requests khud ek dafa dobara try hoti hain. Tafseel + test: `docs/VENDOR_PHASE13.md`.

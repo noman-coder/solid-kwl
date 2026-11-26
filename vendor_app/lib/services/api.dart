@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/coupons.dart';
 import '../models/dashboard.dart';
 import '../models/order_detail.dart';
 import '../models/orders.dart';
@@ -27,7 +28,10 @@ class ApiException implements Exception {
   /// Server ka `code`: auth / pending / locked / bad_login / error ... (net na ho to 'network').
   final String code;
 
-  ApiException(this.message, this.status, {this.code = 'error'});
+  /// Form ki saari ghaltiyan (server `errors` bheje to; warna khali). `message` mein pehli hoti hai.
+  final List<String> errors;
+
+  ApiException(this.message, this.status, {this.code = 'error', this.errors = const []});
 
   /// Token ghalat / expire / password badal gaya -> dobara login chahiye.
   bool get authExpired => status == 401 && code == 'auth';
@@ -79,6 +83,7 @@ class Api {
 
   static const String _dashKey = 'vendor_dash_cache';
   static const String _salesKeyPrefix = 'vendor_sales_cache_';
+  static const String _couponsKey = 'vendor_coupons_cache';
 
   static Future<void> _save() async {
     final p = await SharedPreferences.getInstance();
@@ -101,6 +106,8 @@ class Api {
     return '$base${path.startsWith('/') ? '' : '/'}$path';
   }
 
+  /// Timeout ya net toot'ne par GET ek dafa khud dobara try hota hai (sust / VPN wale net par aksar dusri koshish chal jati hai).
+  /// POST kabhi khud dobara nahi bheja jata (double action na ho).
   static Future<Map<String, dynamic>> _req(String method, String path,
       {Map<String, dynamic>? body}) async {
     final headers = <String, String>{
@@ -108,19 +115,34 @@ class Api {
       'Accept': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
-    http.Response r;
-    try {
-      if (method == 'GET') {
-        r = await http.get(_u(path), headers: headers).timeout(const Duration(seconds: 20));
-      } else {
-        r = await http
-            .post(_u(path), headers: headers, body: jsonEncode(body ?? <String, dynamic>{}))
-            .timeout(const Duration(seconds: 20));
+    final attempts = method == 'GET' ? 2 : 1;
+    var timedOut = false;
+    for (var i = 0; i < attempts; i++) {
+      try {
+        http.Response r;
+        if (method == 'GET') {
+          r = await http.get(_u(path), headers: headers).timeout(const Duration(seconds: 20));
+        } else {
+          r = await http
+              .post(_u(path), headers: headers, body: jsonEncode(body ?? <String, dynamic>{}))
+              .timeout(const Duration(seconds: 20));
+        }
+        return _decode(r);
+      } on ApiException {
+        rethrow; // server ne jawab de diya (ghalat password, 404 ...) - dobara bhejne ka faida nahi
+      } on TimeoutException {
+        timedOut = true;
+      } catch (_) {
+        timedOut = false;
       }
-    } catch (_) {
-      throw ApiException('Internet ya server se rabta nahi ho raha', 0, code: 'network');
     }
-    return _decode(r);
+    throw ApiException(
+      timedOut
+          ? 'Server se jawab bohat dair se aa raha hai. Net / VPN check karke dobara koshish karein.'
+          : 'Internet ya server se rabta nahi ho raha. Net / VPN check karein.',
+      0,
+      code: 'network',
+    );
   }
 
   /// Server ka jawab JSON mein kholo; galti ho to ApiException.
@@ -139,6 +161,9 @@ class Api {
         msg.isEmpty ? 'Kuch masla aa gaya (${r.statusCode}). Dobara koshish karein.' : msg,
         r.statusCode,
         code: s(data['code']).isEmpty ? 'error' : s(data['code']),
+        errors: data['errors'] is List
+            ? (data['errors'] as List).map((e) => s(e)).where((e) => e.isNotEmpty).toList()
+            : const [],
       );
     }
     return data;
@@ -234,6 +259,7 @@ class Api {
     try {
       final p = await SharedPreferences.getInstance();
       await p.remove(_dashKey);
+      await p.remove(_couponsKey); // Phase V13: coupons ki purani list bhi
       for (final k in kSalesPeriods) {
         await p.remove('$_salesKeyPrefix$k'); // Phase V11: sales ka purana data bhi (doosra vendor login kare to)
       }
@@ -530,6 +556,67 @@ class Api {
   static Future<NamedItem> createMaster(String kind, String name) async {
     final d = await _req('POST', '/api/vendor/masters/$kind/', body: {'name': name});
     return NamedItem(toI(d['id']), s(d['name']));
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V13: coupons
+  // ------------------------------------------------------------------
+
+  /// Mere saare coupons (+ ginti). Kamyab list phone mein bhi save hoti hai (net na ho to purani dikhane ke liye).
+  static Future<CouponsPage> coupons() async {
+    final d = await _req('GET', '/api/vendor/coupons/');
+    final page = CouponsPage.fromJson(d);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_couponsKey, jsonEncode(d));
+    } catch (_) {}
+    return page;
+  }
+
+  /// Phone mein save ki hui aakhri coupons list (na ho ya kharab ho to null).
+  static Future<CouponsPage?> cachedCoupons() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_couponsKey);
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? CouponsPage.fromJson(Map<String, dynamic>.from(decoded)) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _cacheCouponsFrom(Map<String, dynamic> d) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_couponsKey, jsonEncode({'summary': d['summary'], 'coupons': d['coupons']}));
+    } catch (_) {}
+  }
+
+  /// Naya coupon ([id] null) ya purana edit. [requestKey]: double tap / retry par dobara coupon na bane.
+  static Future<CouponActionResult> saveCoupon({
+    int? id,
+    required Map<String, dynamic> fields,
+    String? requestKey,
+  }) async {
+    final body = <String, dynamic>{...fields, if (id == null && requestKey != null) 'request_key': requestKey};
+    final d = await _req('POST', id == null ? '/api/vendor/coupons/' : '/api/vendor/coupons/$id/', body: body);
+    await _cacheCouponsFrom(d);
+    return CouponActionResult.fromJson(d);
+  }
+
+  /// Chalu / band (seedha value bhejte hain, retry par ulta nahi hota).
+  static Future<CouponActionResult> setCouponActive(int id, bool active) async {
+    final d = await _req('POST', '/api/vendor/coupons/$id/toggle/', body: {'active': active});
+    await _cacheCouponsFrom(d);
+    return CouponActionResult.fromJson(d);
+  }
+
+  /// Delete. Istemal ho chuka coupon delete nahi hota, sirf band hota hai (`deleted == false`).
+  static Future<CouponActionResult> deleteCoupon(int id) async {
+    final d = await _req('POST', '/api/vendor/coupons/$id/delete/');
+    await _cacheCouponsFrom(d);
+    return CouponActionResult.fromJson(d);
   }
 
   /// Push notification token (FCM) server par register karo (app side Phase V7 mein use hoga).

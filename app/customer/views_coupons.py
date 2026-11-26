@@ -112,6 +112,9 @@ def _num(raw, label, errors, lo, hi, default=None):
     except InvalidOperation:
         errors.append(f'{label}: sahi number likhein')
         return default
+    if not val.is_finite():
+        errors.append(f'{label}: sahi number likhein')
+        return default
     if val < lo or val > hi:
         errors.append(f'{label}: {lo} se {hi} ke beech hona chahiye')
         return default
@@ -130,12 +133,17 @@ def _date(raw, label, errors, end=False):
     return timezone.make_aware(datetime.combine(d, dtime.max if end else dtime.min))
 
 
-def _clean_vendor_coupon(post):
+def _clean_vendor_coupon(post, exclude_pk=None):
+    """Web form aur vendor app API dono yahi validation use karte hain.
+    exclude_pk: edit karte waqt us coupon ka apna pk (taake apna code 'pehle se maujood' na ginay)."""
     errors = []
     code = ''.join((post.get('code') or '').split()).upper()
+    same_code = Coupon.objects.filter(code=code)
+    if exclude_pk is not None:
+        same_code = same_code.exclude(pk=exclude_pk)
     if not CODE_RE.match(code):
         errors.append('Code 3 se 20 harf/number ka ho (jaise WELCOME50), koi space ya nishan nahi')
-    elif Coupon.objects.filter(code=code).exists():
+    elif same_code.exists():
         errors.append('Yeh code pehle se kisi aur coupon ka hai, doosra code chunein')
 
     dtype = post.get('discount_type')

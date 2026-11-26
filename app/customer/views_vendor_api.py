@@ -18,6 +18,9 @@ Phase V11: sales tab - sales (summary, COD/online, profit, chart, top/slow), sta
           khali ho to profit 'N/A'). Add/edit product ab optional `purchase_rate` bhi leta hai.
 Phase V12: rider cash - list (pending + history + jod) aur confirm / reject. Logic `rider_cash_service` ki hai (web wali wahi),
           confirm par RiderSettlement(cash_in) banti hai; reject par raqam rider ke paas hi rehti hai. Koi migration nahi.
+Phase V13: coupons - list (+ summary), create, edit, toggle (chalu / band), delete. Validation web wali `_clean_vendor_coupon`
+          hi hai (coupon engine `coupons.evaluate` checkout par wahi chalta hai). Istemal ho chuka coupon delete nahi hota,
+          sirf band hota hai (hisaab ka record bacha rahe). Koi migration nahi. (Offers - V13-B - alag sub-step.)
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -44,7 +47,7 @@ from django.contrib.auth import authenticate
 from django.core import signing
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.cache import cache
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, F, FloatField, OuterRef, Q, Subquery, Sum, Value, When
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import HttpResponse, JsonResponse
@@ -54,11 +57,13 @@ from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from ..models import (Brand, Category, DeliveryInfo, Inventory, OrderTracking, Product, RiderCashHandover, RiderProfile, SaleOrder,
-                      SaleOrderItem, Unit, VendorProfile, VendorPushToken, VendorStockLog)
+from ..models import (Brand, Category, Coupon, CouponRedemption, DeliveryInfo, Inventory, OrderTracking, Product,
+                      RiderCashHandover, RiderProfile, SaleOrder, SaleOrderItem, Unit, VendorProfile, VendorPushToken,
+                      VendorStockLog)
 from ..vendor_commission import CENT, HUNDRED, commission_percent, vendor_earnings
 from . import store_orders, vendor_stock
 from .views_customer_auth import get_client_ip, normalize_phone
+from .views_coupons import MAX_VENDOR_COUPONS, _clean_vendor_coupon
 from .views_reviews import vendor_rating
 from .views_vendor_portal import (
     LOGIN_LOCK_SECONDS, LOGIN_MAX_ATTEMPTS, MASTER_MODELS, MAX_IMAGE_BYTES, MAX_PRICE, ORDER_TABS,
@@ -2164,3 +2169,243 @@ def api_rider_cash_action(request, profile, pk, action):
     fresh = _cash_qs(vendor).get(pk=pk)
     return JsonResponse({'ok': True, 'message': msg, 'handover': _cash_json(fresh),
                          'summary': _cash_summary(vendor)})
+
+
+# ================================================================
+# Phase V13: coupons
+# GET/POST /api/vendor/coupons/   POST .../<id>/   POST .../<id>/toggle/   POST .../<id>/delete/
+# Naya business logic nahi: validation web wali `_clean_vendor_coupon`; checkout par `coupons.evaluate` wahi chalta hai.
+# ================================================================
+
+COUPON_TRUE = (True, 1, '1', 'true', 'True', 'TRUE', 'on', 'yes')
+
+
+def _coupon_form(d):
+    """JSON body ko `_clean_vendor_coupon` ke form (sab text) mein badlo. Web form jaisa hi: first_order_only='on'."""
+    def txt(key):
+        v = d.get(key)
+        return '' if v is None or isinstance(v, (dict, list)) else str(v).strip()
+
+    form = {k: txt(k) for k in ('code', 'title', 'discount_type', 'value', 'max_discount', 'min_order', 'usage_limit',
+                                'per_customer_limit', 'valid_from', 'valid_until')}
+    form['first_order_only'] = 'on' if d.get('first_order_only') in COUPON_TRUE else ''
+    return form
+
+
+def _local_ymd(dt):
+    return timezone.localtime(dt).date().isoformat() if dt else ''
+
+
+def _coupon_share_text(c, store):
+    lines = [f'🎁 {store} par coupon: {c.code}']
+    lines.append(f'{c.title} ({c.short_label})' if c.title else c.short_label)
+    if c.min_order and c.min_order > 0:
+        lines.append(f'Kam az kam Rs. {c.min_order:,.0f} ka order')
+    if c.first_order_only:
+        lines.append('Sirf pehle order par')
+    if c.valid_until:
+        lines.append(f'{_local_ymd(c.valid_until)} tak')
+    lines.append('Checkout par code likh kar discount lein.')
+    return '\n'.join(lines)
+
+
+def _coupon_json(c, used, given, store=''):
+    """`used` = cancelled orders ke baghair istemal; `given` = ab tak diya gaya discount + delivery maaf (Rs.)."""
+    remaining = None if c.usage_limit is None else max(0, c.usage_limit - used)
+    return {
+        'id': c.pk, 'code': c.code, 'title': c.title or '', 'label': c.short_label,
+        'discount_type': c.discount_type, 'value': _money(c.value),
+        'max_discount': _money(c.max_discount) if c.max_discount is not None else None,
+        'min_order': _money(c.min_order),
+        'usage_limit': c.usage_limit, 'per_customer_limit': c.per_customer_limit,
+        'first_order_only': bool(c.first_order_only),
+        'valid_from': _local_ymd(c.valid_from), 'valid_until': _local_ymd(c.valid_until),
+        'is_active': bool(c.is_active), 'status': c.status,
+        'used': used, 'remaining': remaining, 'given': _money(given),
+        'core_locked': used > 0,     # istemal ke baad type / value / code badalna band
+        'created_at': _iso(c.created_at),
+        'share_text': _coupon_share_text(c, store),
+    }
+
+
+def _coupon_usage(vendor, ids=None):
+    """{coupon_id: (used, given)} - cancelled order wali redemption ginti mein nahi (Coupon.live_redemptions jaisa)."""
+    qs = CouponRedemption.objects.filter(coupon__vendor=vendor).exclude(sale_order__status='cancelled')
+    if ids is not None:
+        qs = qs.filter(coupon_id__in=ids)
+    rows = qs.values('coupon_id').annotate(n=Count('id'), d=Sum('discount_amount'), w=Sum('delivery_waived'))
+    return {r['coupon_id']: (r['n'] or 0, Decimal(r['d'] or 0) + Decimal(r['w'] or 0)) for r in rows}
+
+
+def _coupon_summary(coupons, usage):
+    s = {'total': len(coupons), 'max': MAX_VENDOR_COUPONS, 'active': 0, 'scheduled': 0, 'expired': 0, 'paused': 0,
+         'used_total': 0, 'given_total': 0.0}
+    given = Decimal('0')
+    for c in coupons:
+        st = c.status
+        key = 'expired' if st in ('expired', 'used_up') else st
+        if key in s:
+            s[key] += 1
+        n, g = usage.get(c.pk, (0, Decimal('0')))
+        s['used_total'] += n
+        given += g
+    s['given_total'] = _money(given)
+    return s
+
+
+def _coupons_payload(profile):
+    vendor = profile.vendor
+    coupons = list(Coupon.objects.filter(vendor=vendor).order_by('-created_at', '-pk'))
+    usage = _coupon_usage(vendor)
+    store = store_orders.store_name(vendor.pk)
+    return {
+        'summary': _coupon_summary(coupons, usage),
+        'coupons': [_coupon_json(c, *usage.get(c.pk, (0, Decimal('0'))), store=store) for c in coupons],
+    }
+
+
+def _one_coupon_json(profile, c):
+    usage = _coupon_usage(profile.vendor, [c.pk])
+    return _coupon_json(c, *usage.get(c.pk, (0, Decimal('0'))), store=store_orders.store_name(profile.vendor.pk))
+
+
+def _owned_coupon(profile, pk, lock=False):
+    qs = Coupon.objects.filter(pk=pk, vendor=profile.vendor)
+    return (qs.select_for_update() if lock else qs).first()
+
+
+def _coupon_not_found():
+    return _err('Coupon nahi mila.', 404, code='not_found')
+
+
+@vendor_api(['GET', 'POST'])
+def api_coupons(request, profile):
+    """GET  /api/vendor/coupons/   -> {summary, coupons[]} (sirf apne coupons, naya pehle; zyada se zyada 50)
+    POST /api/vendor/coupons/   -> naya coupon.
+
+    POST body: code, title?, discount_type (percent | fixed | free_delivery), value, max_discount? (percent par),
+    min_order?, usage_limit?, per_customer_limit? (0 = be-had, default 1), first_order_only?, valid_from?, valid_until?
+    (YYYY-MM-DD), request_key? (8-64 akshar: double tap / retry par dobara coupon na bane).
+    Validation web wali `_clean_vendor_coupon` (percent max 70, code unique, tareekhein)."""
+    vendor = profile.vendor
+    if request.method == 'GET':
+        return JsonResponse({'ok': True, **_coupons_payload(profile)})
+
+    d = _data(request)
+    rk = str(d.get('request_key') or '')
+    rk = rk if _REQUEST_KEY_RE.match(rk) else ''
+    done_key = lock_key = ''
+    if rk:
+        done_key = f'vendor_coupon_add:{vendor.pk}:{rk}'
+        lock_key = done_key + ':lock'
+        prev = cache.get(done_key)
+        if prev:
+            fresh = _owned_coupon(profile, prev)
+            if fresh is not None:
+                return JsonResponse({'ok': True, 'message': 'Yeh coupon pehle hi ban chuka hai.', 'duplicate': True,
+                                     'coupon': _one_coupon_json(profile, fresh), **_coupons_payload(profile)})
+        if not cache.add(lock_key, 1, 30):
+            return _err('Coupon ban raha hai, thora intezar karein.', 409, code='in_progress')
+
+    try:
+        if Coupon.objects.filter(vendor=vendor).count() >= MAX_VENDOR_COUPONS:
+            return _err(f'Zyada se zyada {MAX_VENDOR_COUPONS} coupons ho sakte hain. Purane delete karein.', 400,
+                        code='limit')
+        data, errors = _clean_vendor_coupon(_coupon_form(d))
+        if errors:
+            return _validation_err(errors)
+        try:
+            with transaction.atomic():
+                c = Coupon.objects.create(vendor=vendor, created_by=profile.user, **data)
+        except IntegrityError:
+            return _validation_err(['Yeh code pehle se maujood hai, doosra code chunein'])
+        except Exception:
+            logger.exception('Vendor API coupon create error')
+            return _err('Coupon nahi bana, dobara koshish karein.', 500, code='server')
+        if done_key:
+            cache.set(done_key, c.pk, 600)
+    finally:
+        if lock_key:
+            cache.delete(lock_key)
+
+    return JsonResponse({'ok': True, 'message': f'Coupon {c.code} ban gaya.', 'coupon': _one_coupon_json(profile, c),
+                         **_coupons_payload(profile)})
+
+
+@vendor_api(['POST'])
+def api_coupon_edit(request, profile, pk):
+    """POST /api/vendor/coupons/<id>/   (body create jaisi; `code` kabhi nahi badalta)
+
+    Istemal ho chuke coupon par type / value / max_discount nahi badalte (customer ko jo vada kiya wahi rahe);
+    baqi (title, min order, limits, tareekhein) badal sakte hain. `usage_limit` ab tak ke istemal se kam nahi ho sakta."""
+    d = _data(request)
+    with transaction.atomic():
+        c = _owned_coupon(profile, pk, lock=True)
+        if c is None:
+            return _coupon_not_found()
+        used_any = c.redemptions.exists()
+        form = _coupon_form(d)
+        form['code'] = c.code
+        if used_any:
+            form['discount_type'] = c.discount_type
+            form['value'] = format(c.value, 'f')
+            form['max_discount'] = '' if c.max_discount is None else format(c.max_discount, 'f')
+        data, errors = _clean_vendor_coupon(form, exclude_pk=c.pk)
+        if not errors and data['usage_limit'] is not None:
+            live = c.live_redemptions().count()
+            if data['usage_limit'] < live:
+                errors.append(f'Kul istemal {live} se kam nahi ho sakta (itni dafa chal chuka hai)')
+        if errors:
+            return _validation_err(errors)
+        data.pop('code', None)
+        for k, v in data.items():
+            setattr(c, k, v)
+        c.save(update_fields=list(data.keys()))
+    return JsonResponse({'ok': True, 'message': f'Coupon {c.code} update ho gaya.',
+                         'coupon': _one_coupon_json(profile, c), **_coupons_payload(profile)})
+
+
+@vendor_api(['POST'])
+def api_coupon_toggle(request, profile, pk):
+    """POST /api/vendor/coupons/<id>/toggle/   body: {active?: true|false}
+    `active` dein to wahi set hota hai (retry / double tap par ulta nahi hota); na dein to ulta kar deta hai."""
+    d = _data(request)
+    with transaction.atomic():
+        c = _owned_coupon(profile, pk, lock=True)
+        if c is None:
+            return _coupon_not_found()
+        if 'active' in d and d.get('active') not in (None, ''):
+            want = d.get('active') in COUPON_TRUE
+        else:
+            want = not c.is_active
+        if c.is_active != want:
+            c.is_active = want
+            c.save(update_fields=['is_active'])
+    return JsonResponse({'ok': True, 'message': f"{c.code} {'chalu' if c.is_active else 'band'} kar diya.",
+                         'coupon': _one_coupon_json(profile, c), **_coupons_payload(profile)})
+
+
+@vendor_api(['POST'])
+def api_coupon_delete(request, profile, pk):
+    """POST /api/vendor/coupons/<id>/delete/
+    Istemal ho chuka coupon delete nahi hota (hisaab ka record na jaye): sirf band hota hai -> `deleted: false`.
+    Coupon row lock karke check hota hai, taake isi waqt koi order redeem kare to uska record cascade mein na urre."""
+    with transaction.atomic():
+        c = _owned_coupon(profile, pk, lock=True)
+        if c is None:
+            return _coupon_not_found()
+        code = c.code
+        if c.redemptions.exists():
+            if c.is_active:
+                c.is_active = False
+                c.save(update_fields=['is_active'])
+            deleted = False
+            msg = f'{code} istemal ho chuka hai, is liye delete nahi hua - band kar diya.'
+        else:
+            c.delete()
+            deleted = True
+            msg = f'{code} delete ho gaya.'
+    payload = {'ok': True, 'message': msg, 'deleted': deleted, 'id': pk, **_coupons_payload(profile)}
+    if not deleted:
+        payload['coupon'] = _one_coupon_json(profile, _owned_coupon(profile, pk))
+    return JsonResponse(payload)
