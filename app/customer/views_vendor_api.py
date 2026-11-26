@@ -18,9 +18,15 @@ Phase V11: sales tab - sales (summary, COD/online, profit, chart, top/slow), sta
           khali ho to profit 'N/A'). Add/edit product ab optional `purchase_rate` bhi leta hai.
 Phase V12: rider cash - list (pending + history + jod) aur confirm / reject. Logic `rider_cash_service` ki hai (web wali wahi),
           confirm par RiderSettlement(cash_in) banti hai; reject par raqam rider ke paas hi rehti hai. Koi migration nahi.
+Phase V13-B: offers - product par waqt-wala discount (start-end date). List / create / edit / toggle / delete + product picker.
+          Product ki price kabhi nahi badalti: customer ko dikhate waqt offer upar se lagta hai (`offers.py`), khatam hote hi
+          price khud pehli jaisi. Nayi table `ProductOffer` (migration 0064, sirf additive).
 Phase V13: coupons - list (+ summary), create, edit, toggle (chalu / band), delete. Validation web wali `_clean_vendor_coupon`
           hi hai (coupon engine `coupons.evaluate` checkout par wahi chalta hai). Istemal ho chuka coupon delete nahi hota,
           sirf band hota hai (hisaab ka record bacha rahe). Koi migration nahi. (Offers - V13-B - alag sub-step.)
+Phase V14: reviews - list (rating ka khulasa, 5-1 star bars, filter: sab / jawab nahi diya / jawab diya, star, page) aur reply
+          (jawab dein / badlein / hatayein). Logic web ki `views_extras.save_vendor_reply` hi hai; customer ka naam privacy ke liye
+          'Hadi A.' jaisa. Naye review par push pehle se (V2 `notify_new_review`). Koi migration nahi.
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -59,12 +65,13 @@ from django.views.decorators.http import require_http_methods
 
 from ..models import (Brand, Category, Coupon, CouponRedemption, DeliveryInfo, Inventory, OrderTracking, Product,
                       RiderCashHandover, RiderProfile, SaleOrder, SaleOrderItem, Unit, VendorProfile, VendorPushToken,
-                      VendorStockLog)
+                      VendorStockLog, ProductOffer, OrderReview)
 from ..vendor_commission import CENT, HUNDRED, commission_percent, vendor_earnings
-from . import store_orders, vendor_stock
+from . import offers as offers_engine, store_orders, vendor_stock
 from .views_customer_auth import get_client_ip, normalize_phone
 from .views_coupons import MAX_VENDOR_COUPONS, _clean_vendor_coupon
-from .views_reviews import vendor_rating
+from .views_extras import MAX_REPLY_LEN, save_vendor_reply
+from .views_reviews import _reviewer_name, vendor_rating
 from .views_vendor_portal import (
     LOGIN_LOCK_SECONDS, LOGIN_MAX_ATTEMPTS, MASTER_MODELS, MAX_IMAGE_BYTES, MAX_PRICE, ORDER_TABS,
     _apply_product_edit, _auto_approve_products, _clean_product_form, _err_text, _login_key, _save_new_product,
@@ -2409,3 +2416,410 @@ def api_coupon_delete(request, profile, pk):
     if not deleted:
         payload['coupon'] = _one_coupon_json(profile, _owned_coupon(profile, pk))
     return JsonResponse(payload)
+
+
+# ================================================================
+# Phase V13-B: offers (product par waqt-wala discount)
+# GET/POST /api/vendor/offers/   GET .../offers/products/   POST .../<id>/   POST .../<id>/toggle/   POST .../<id>/delete/
+# Product ki price / discount kabhi nahi badalti. Asar = max(product ka apna discount, offer %), sirf start-end ke andar.
+# ================================================================
+
+def _offer_not_found():
+    return _err('Offer nahi mila.', 404, code='not_found')
+
+
+def _owned_offer(profile, pk, lock=False):
+    qs = ProductOffer.objects.filter(pk=pk, profile=profile).select_related('product', 'product__category')
+    if lock:
+        qs = qs.select_for_update(of=('self',))
+    return qs.first()
+
+
+def _parse_ymd(v):
+    try:
+        return datetime.strptime(str(v or '').strip(), '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _offer_ends_on(o):
+    """Aakhri din (shamil), local date."""
+    return timezone.localtime(o.ends_at - timedelta(seconds=1)).date()
+
+
+def _offer_share_text(o, store):
+    regular, offer_price = offers_engine.prices(o.product, o.discount_percent)
+    pct = f'{o.discount_percent:g}'
+    return '\n'.join([
+        f'🔥 {store} par offer: {o.product.name}',
+        f'{pct}% off - Rs. {offer_price:,.0f} (pehle Rs. {offers_engine.base_price(o.product):,.0f})',
+        f'{_offer_ends_on(o).isoformat()} tak.',
+    ])
+
+
+def _offer_json(o, store='', now_=None):
+    p = o.product
+    now_ = now_ or timezone.now()
+    state = offers_engine.offer_state(o, now_)
+    regular, offer_price = offers_engine.prices(p, o.discount_percent)
+    days_left = None
+    if state in ('live', 'scheduled'):
+        days_left = max(0, (_offer_ends_on(o) - timezone.localtime(now_).date()).days + 1)
+    return {
+        'id': o.pk,
+        'product': {'id': p.pk, 'name': p.name, 'image': _media_url(p.image),
+                    'category': p.category.name if p.category_id else ''},
+        'discount_percent': _money(o.discount_percent),
+        'base_price': _money(offers_engine.base_price(p)),
+        'regular_price': _money(regular),
+        'offer_price': _money(offer_price),
+        'product_discount': _money(p.discount_percentage),
+        'effective': offer_price < regular,      # false: product ka apna discount offer se bara/barabar hai (offer ka asar nahi)
+        'starts_on': timezone.localtime(o.starts_at).date().isoformat(),
+        'ends_on': _offer_ends_on(o).isoformat(),
+        'is_active': bool(o.is_active),
+        'state': state,
+        'days_left': days_left,
+        'max_percent': _money(offers_engine.max_allowed_percent(o.profile, p)),
+        'created_at': _iso(o.created_at),
+        'share_text': _offer_share_text(o, store),
+    }
+
+
+def _offers_payload(profile):
+    now_ = timezone.now()
+    store = store_orders.store_name(profile.vendor.pk)
+    rows = list(ProductOffer.objects.filter(profile=profile).select_related('product', 'product__category', 'profile')
+                .order_by('-created_at', '-pk')[:offers_engine.MAX_VENDOR_OFFERS])
+    summary = {'total': len(rows), 'max': offers_engine.MAX_VENDOR_OFFERS, 'live': 0, 'scheduled': 0, 'paused': 0, 'ended': 0}
+    out = []
+    for o in rows:
+        j = _offer_json(o, store, now_)
+        summary[j['state']] += 1
+        out.append(j)
+    return {'summary': summary, 'offers': out,
+            'limits': {'min_percent': _money(offers_engine.MIN_OFFER_PERCENT),
+                       'max_percent': _money(offers_engine.MAX_OFFER_PERCENT),
+                       'max_days': offers_engine.MAX_OFFER_DAYS}}
+
+
+def _one_offer_json(profile, o):
+    fresh = _owned_offer(profile, o.pk)
+    return _offer_json(fresh, store_orders.store_name(profile.vendor.pk)) if fresh else None
+
+
+def _offer_overlap(product, starts_at, ends_at, exclude_pk=None):
+    """Is product par isi dauran koi aur (chalu, abhi khatam nahi) offer?"""
+    qs = ProductOffer.objects.filter(product=product, is_active=True, starts_at__lt=ends_at,
+                                     ends_at__gt=max(timezone.now(), starts_at))
+    if exclude_pk:
+        qs = qs.exclude(pk=exclude_pk)
+    return qs.exists()
+
+
+def _clean_offer(profile, product, d, existing=None):
+    """-> (pct, starts_at, ends_at, errors). Create aur edit dono ke liye."""
+    errors = []
+    try:
+        pct = Decimal(str(d.get('discount_percent')).strip())
+        if not pct.is_finite():
+            raise ValueError
+    except Exception:
+        return None, None, None, ['Discount % sahi likhein (maslan 15).']
+    pct = pct.quantize(Decimal('0.01'))
+    cap = offers_engine.max_allowed_percent(profile, product)
+    if pct < offers_engine.MIN_OFFER_PERCENT:
+        errors.append(f'Discount kam az kam {offers_engine.MIN_OFFER_PERCENT:g}% hona chahiye.')
+    elif pct > cap:
+        if cap < offers_engine.MIN_OFFER_PERCENT:
+            errors.append('Is product par offer nahi ban sakta (commission ki hadd ke baad gunjaish nahi).')
+        else:
+            errors.append(f'Is product par zyada se zyada {cap:g}% offer ho sakta hai.')
+
+    today = timezone.localtime(timezone.now()).date()
+    start = _parse_ymd(d.get('starts_on')) if str(d.get('starts_on') or '').strip() else (
+        timezone.localtime(existing.starts_at).date() if existing else today)
+    end = _parse_ymd(d.get('ends_on'))
+    if start is None:
+        errors.append('Shuru ki tareekh sahi nahi (YYYY-MM-DD).')
+    if end is None:
+        errors.append('Khatam hone ki tareekh sahi nahi (YYYY-MM-DD).')
+    if errors:
+        return None, None, None, errors
+    if end < start:
+        return None, None, None, ['Khatam ki tareekh shuru se pehle nahi ho sakti.']
+    if (end - start).days + 1 > offers_engine.MAX_OFFER_DAYS:
+        return None, None, None, [f'Offer zyada se zyada {offers_engine.MAX_OFFER_DAYS} din ka ho sakta hai.']
+    if end < today:
+        return None, None, None, ['Khatam ki tareekh guzar chuki hai.']
+    if existing is None and start < today:
+        return None, None, None, ['Shuru ki tareekh aaj ya baad ki rakhein.']
+    if existing is not None and timezone.localtime(existing.starts_at).date() != start:
+        if existing.starts_at <= timezone.now():
+            return None, None, None, ['Chalu offer ki shuruaat nahi badal sakte. Sirf discount ya khatam ki tareekh badlein.']
+        if start < today:
+            return None, None, None, ['Shuru ki tareekh aaj ya baad ki rakhein.']
+    starts_at, ends_at = offers_engine.window_from_dates(start, end)
+    if existing is not None and timezone.localtime(existing.starts_at).date() == start:
+        starts_at = existing.starts_at
+    return pct, starts_at, ends_at, []
+
+
+@vendor_api(['GET'])
+def api_offer_products(request, profile):
+    """GET /api/vendor/offers/products/?q=   -> offer ke liye products (sirf approved + chalu), `max_percent` ke saath."""
+    q = str(request.GET.get('q') or '').strip()[:60]
+    qs = Product.objects.filter(vendor=profile.vendor, approval_status='approved', is_active=True).select_related('category')
+    if q:
+        qs = qs.filter(Q(name__icontains=q) | Q(barcode__icontains=q))
+    rows = list(qs.order_by('name')[:50])
+    now_ = timezone.now()
+    busy = set(ProductOffer.objects.filter(product__in=rows, is_active=True, ends_at__gt=now_)
+               .values_list('product_id', flat=True))
+    out = []
+    for p in rows:
+        out.append({
+            'id': p.pk, 'name': p.name, 'image': _media_url(p.image),
+            'category': p.category.name if p.category_id else '',
+            'base_price': _money(offers_engine.base_price(p)),
+            'regular_price': _money(offers_engine.prices(p, 0)[0]),
+            'product_discount': _money(p.discount_percentage),
+            'max_percent': _money(offers_engine.max_allowed_percent(profile, p)),
+            'has_offer': p.pk in busy,
+        })
+    return JsonResponse({'ok': True, 'products': out})
+
+
+@vendor_api(['GET', 'POST'])
+def api_offers(request, profile):
+    """GET  /api/vendor/offers/   -> {summary, offers[], limits} (sirf apne, naya pehle)
+    POST /api/vendor/offers/   -> naya offer: product_id, discount_percent, starts_on? (YYYY-MM-DD, default aaj),
+    ends_on (YYYY-MM-DD, shamil), request_key? (8-64 akshar: double tap / retry par dobara offer na bane).
+    Offer sirf approved product par; us din tak jis din ends_on hai. Product ki asli price nahi badalti."""
+    vendor = profile.vendor
+    if request.method == 'GET':
+        return JsonResponse({'ok': True, **_offers_payload(profile)})
+
+    d = _data(request)
+    rk = str(d.get('request_key') or '')
+    rk = rk if _REQUEST_KEY_RE.match(rk) else ''
+    done_key = lock_key = ''
+    if rk:
+        done_key = f'vendor_offer_add:{vendor.pk}:{rk}'
+        lock_key = done_key + ':lock'
+        prev = cache.get(done_key)
+        if prev:
+            fresh = _owned_offer(profile, prev)
+            if fresh is not None:
+                return JsonResponse({'ok': True, 'message': 'Yeh offer pehle hi ban chuka hai.', 'duplicate': True,
+                                     'offer': _one_offer_json(profile, fresh), **_offers_payload(profile)})
+        if not cache.add(lock_key, 1, 30):
+            return _err('Offer ban raha hai, thora intezar karein.', 409, code='in_progress')
+
+    try:
+        try:
+            pid = int(d.get('product_id'))
+        except (TypeError, ValueError):
+            return _validation_err(['Product chunein.'])
+        if ProductOffer.objects.filter(profile=profile).count() >= offers_engine.MAX_VENDOR_OFFERS:
+            return _err(f'Zyada se zyada {offers_engine.MAX_VENDOR_OFFERS} offers ho sakte hain. Purane delete karein.', 400,
+                        code='limit')
+        try:
+            with transaction.atomic():
+                product = Product.objects.select_for_update().filter(pk=pid, vendor=vendor).first()
+                if product is None:
+                    return _err('Product nahi mila.', 404, code='not_found')
+                if product.approval_status != 'approved' or not product.is_active:
+                    return _validation_err(['Offer sirf approved aur chalu product par lag sakta hai.'])
+                pct, starts_at, ends_at, errors = _clean_offer(profile, product, d)
+                if errors:
+                    return _validation_err(errors)
+                if _offer_overlap(product, starts_at, ends_at):
+                    return _err('Is product par isi dauran pehle se offer hai. Pehle usay badlein ya band karein.', 409,
+                                code='overlap')
+                o = ProductOffer.objects.create(product=product, profile=profile, discount_percent=pct,
+                                                starts_at=starts_at, ends_at=ends_at, request_key=rk)
+        except Exception:
+            logger.exception('Vendor API offer create error')
+            return _err('Offer nahi bana, dobara koshish karein.', 500, code='server')
+        if done_key:
+            cache.set(done_key, o.pk, 600)
+    finally:
+        if lock_key:
+            cache.delete(lock_key)
+
+    return JsonResponse({'ok': True, 'message': 'Offer ban gaya.', 'offer': _one_offer_json(profile, o),
+                         **_offers_payload(profile)})
+
+
+@vendor_api(['POST'])
+def api_offer_edit(request, profile, pk):
+    """POST /api/vendor/offers/<id>/   body: discount_percent, ends_on, starts_on? (product nahi badalta).
+    Khatam offer nahi badalta. Chalu offer ki shuruaat nahi badalti."""
+    d = _data(request)
+    with transaction.atomic():
+        o = _owned_offer(profile, pk, lock=True)
+        if o is None:
+            return _offer_not_found()
+        if o.ends_at <= timezone.now():
+            return _err('Khatam offer badal nahi sakte. Naya offer banayein.', 409, code='ended')
+        product = o.product
+        pct, starts_at, ends_at, errors = _clean_offer(profile, product, d, existing=o)
+        if errors:
+            return _validation_err(errors)
+        if o.is_active and _offer_overlap(product, starts_at, ends_at, exclude_pk=o.pk):
+            return _err('Is product par isi dauran doosra offer hai.', 409, code='overlap')
+        o.discount_percent, o.starts_at, o.ends_at = pct, starts_at, ends_at
+        o.save(update_fields=['discount_percent', 'starts_at', 'ends_at', 'updated_at'])
+    return JsonResponse({'ok': True, 'message': 'Offer update ho gaya.', 'offer': _one_offer_json(profile, o),
+                         **_offers_payload(profile)})
+
+
+@vendor_api(['POST'])
+def api_offer_toggle(request, profile, pk):
+    """POST /api/vendor/offers/<id>/toggle/   body: {active?: true|false}   (na ho to ulta)."""
+    d = _data(request)
+    with transaction.atomic():
+        o = _owned_offer(profile, pk, lock=True)
+        if o is None:
+            return _offer_not_found()
+        want = (not o.is_active) if 'active' not in d else (d.get('active') in COUPON_TRUE)
+        if want and o.ends_at <= timezone.now():
+            return _err('Khatam offer dobara chalu nahi ho sakta. Naya offer banayein.', 409, code='ended')
+        if want and _offer_overlap(o.product, o.starts_at, o.ends_at, exclude_pk=o.pk):
+            return _err('Is product par isi dauran doosra offer chalu hai.', 409, code='overlap')
+        if o.is_active != want:
+            o.is_active = want
+            o.save(update_fields=['is_active', 'updated_at'])
+    return JsonResponse({'ok': True, 'message': 'Offer chalu ho gaya.' if want else 'Offer band ho gaya.',
+                         'offer': _one_offer_json(profile, o), **_offers_payload(profile)})
+
+
+@vendor_api(['POST'])
+def api_offer_delete(request, profile, pk):
+    """POST /api/vendor/offers/<id>/delete/   Offer ka hisaab kahin nahi jata (orders mein price pehle hi likhi hoti hai), isliye asli delete."""
+    with transaction.atomic():
+        o = _owned_offer(profile, pk, lock=True)
+        if o is None:
+            return _offer_not_found()
+        o.delete()
+    return JsonResponse({'ok': True, 'message': 'Offer delete ho gaya.', 'deleted': True, 'id': pk,
+                         **_offers_payload(profile)})
+
+
+
+# ================================================================
+# Phase V14 - Reviews & ratings
+# Naya business logic nahi: OrderReview (customer ki rating) aur jawab save karne ki logic web portal wali hi hai.
+# ================================================================
+
+REVIEWS_PAGE_SIZE = 20
+REVIEW_FILTERS = ('all', 'unanswered', 'replied')
+
+
+def _rated_reviews(vendor):
+    """Sirf wo reviews jin mein store ko star diye gaye (rider-only rating is vendor ki nahi)."""
+    return OrderReview.objects.filter(vendor=vendor, vendor_rating__isnull=False)
+
+
+def _reviews_summary(vendor):
+    """{avg, count, replied, unanswered, bars[5..1]} - filter se alag, hamesha poore reviews ka hisaab."""
+    base = _rated_reviews(vendor)
+    stars = {r['vendor_rating']: r['n'] for r in base.order_by().values('vendor_rating').annotate(n=Count('id'))}
+    count = sum(stars.values())
+    unanswered = base.filter(vendor_reply='').count()
+    avg = round(sum(k * v for k, v in stars.items()) / count, 1) if count else None
+    return {
+        'avg': avg,
+        'count': count,
+        'replied': count - unanswered,
+        'unanswered': unanswered,
+        'bars': [{'stars': i, 'count': stars.get(i, 0), 'pct': round(stars.get(i, 0) * 100 / count) if count else 0}
+                 for i in (5, 4, 3, 2, 1)],
+    }
+
+
+def _review_json(rv):
+    return {
+        'id': rv.pk,
+        'order_id': rv.sale_order_id,
+        'order_no': rv.sale_order.order_no,
+        'stars': int(rv.vendor_rating or 0),
+        'comment': rv.vendor_comment or '',
+        'name': _reviewer_name(rv.sale_order),
+        'created_at': _iso(rv.created_at),
+        'reply': rv.vendor_reply or '',
+        'replied_at': _iso(rv.vendor_replied_at),
+    }
+
+
+@vendor_api(['GET'])
+def api_reviews(request, profile):
+    """GET /api/vendor/reviews/?filter=all|unanswered|replied&stars=1..5&page=1
+
+    -> {summary: {avg, count, replied, unanswered, bars[]}, reviews[] (naya pehle, 20 ka page), has_more, max_reply_len}
+    Sirf is vendor ke reviews. Summary / bars filter se alag (hamesha poore). Customer ka naam 'Hadi A.' (privacy).
+    Ghalat filter -> 'all', ghalat stars -> sab stars.
+    """
+    vendor = profile.vendor
+    flt = request.GET.get('filter', 'all')
+    if flt not in REVIEW_FILTERS:
+        flt = 'all'
+    try:
+        stars = int(request.GET.get('stars') or 0)
+    except (TypeError, ValueError):
+        stars = 0
+    if not 1 <= stars <= 5:
+        stars = 0
+    page = _parse_page(request.GET.get('page'))
+
+    qs = _rated_reviews(vendor)
+    if flt == 'unanswered':
+        qs = qs.filter(vendor_reply='')
+    elif flt == 'replied':
+        qs = qs.exclude(vendor_reply='')
+    if stars:
+        qs = qs.filter(vendor_rating=stars)
+    qs = qs.select_related('sale_order__customer').order_by('-created_at', '-pk')
+    start = (page - 1) * REVIEWS_PAGE_SIZE
+    rows = list(qs[start:start + REVIEWS_PAGE_SIZE + 1])
+    has_more = len(rows) > REVIEWS_PAGE_SIZE
+    rows = rows[:REVIEWS_PAGE_SIZE]
+
+    return JsonResponse({
+        'ok': True,
+        'generated_at': now().isoformat(),
+        'filter': flt,
+        'stars': stars,
+        'page': page,
+        'has_more': has_more,
+        'summary': _reviews_summary(vendor),
+        'reviews': [_review_json(rv) for rv in rows],
+        'max_reply_len': MAX_REPLY_LEN,
+    })
+
+
+@vendor_api(['POST'])
+def api_review_reply(request, profile, pk):
+    """POST /api/vendor/reviews/<id>/reply/   body: {reply: '...'}
+
+    Jawab dein ya badlein; khali `reply` = jawab hata dein. Zyada se zyada 300 akshar (is se lamba -> 400, chupke kaat nahi dete).
+    Doosre vendor ka review (ya jis mein store ki rating hi nahi) -> 404.
+    """
+    raw = _data(request).get('reply')
+    if raw is not None and not isinstance(raw, str):
+        return _err('Jawab sirf text ho sakta hai.', 400, code='validation')
+    text = (raw or '').strip()
+    if len(text) > MAX_REPLY_LEN:
+        return _err(f'Jawab zyada se zyada {MAX_REPLY_LEN} akshar ka ho sakta hai (abhi {len(text)}).', 400, code='too_long')
+    with transaction.atomic():
+        rv = _rated_reviews(profile.vendor).select_for_update().filter(pk=pk).first()
+        if rv is None:
+            return _err('Review nahi mila.', 404, code='not_found')
+        saved = save_vendor_reply(rv, text)
+    return JsonResponse({
+        'ok': True,
+        'message': 'Jawab save ho gaya.' if saved else 'Jawab hata diya.',
+        'review': _review_json(rv),
+        'summary': _reviews_summary(profile.vendor),
+    })

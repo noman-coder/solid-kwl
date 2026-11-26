@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/coupons.dart';
+import '../models/reviews.dart';
+import '../models/offers.dart';
 import '../models/dashboard.dart';
 import '../models/order_detail.dart';
 import '../models/orders.dart';
@@ -84,6 +86,8 @@ class Api {
   static const String _dashKey = 'vendor_dash_cache';
   static const String _salesKeyPrefix = 'vendor_sales_cache_';
   static const String _couponsKey = 'vendor_coupons_cache';
+  static const String _offersKey = 'vendor_offers_cache';
+  static const String _reviewsKey = 'vendor_reviews_cache';
 
   static Future<void> _save() async {
     final p = await SharedPreferences.getInstance();
@@ -260,6 +264,8 @@ class Api {
       final p = await SharedPreferences.getInstance();
       await p.remove(_dashKey);
       await p.remove(_couponsKey); // Phase V13: coupons ki purani list bhi
+      await p.remove(_offersKey); // Phase V13-B: offers ki purani list bhi
+      await p.remove(_reviewsKey); // Phase V14: reviews ki purani list bhi
       for (final k in kSalesPeriods) {
         await p.remove('$_salesKeyPrefix$k'); // Phase V11: sales ka purana data bhi (doosra vendor login kare to)
       }
@@ -617,6 +623,107 @@ class Api {
     final d = await _req('POST', '/api/vendor/coupons/$id/delete/');
     await _cacheCouponsFrom(d);
     return CouponActionResult.fromJson(d);
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V13-B: offers
+  // ------------------------------------------------------------------
+
+  /// Mere saare offers (+ ginti). Kamyab list phone mein bhi save hoti hai (net na ho to purani dikhane ke liye).
+  static Future<OffersPage> offers() async {
+    final d = await _req('GET', '/api/vendor/offers/');
+    final page = OffersPage.fromJson(d);
+    await _cacheOffersFrom(d);
+    return page;
+  }
+
+  /// Phone mein save ki hui aakhri offers list (na ho ya kharab ho to null).
+  static Future<OffersPage?> cachedOffers() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_offersKey);
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? OffersPage.fromJson(Map<String, dynamic>.from(decoded)) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _cacheOffersFrom(Map<String, dynamic> d) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_offersKey, jsonEncode({'summary': d['summary'], 'offers': d['offers'], 'limits': d['limits']}));
+    } catch (_) {}
+  }
+
+  /// Offer ke liye products (sirf approved + chalu); [q] naam / barcode.
+  static Future<List<OfferPick>> offerProducts({String q = ''}) async {
+    final d = await _req('GET', '/api/vendor/offers/products/${q.trim().isEmpty ? '' : '?q=${Uri.encodeQueryComponent(q.trim())}'}');
+    return listOfMaps(d['products']).map(OfferPick.fromJson).toList();
+  }
+
+  /// Naya offer ([id] null) ya purana edit. [requestKey]: double tap / retry par dobara offer na bane.
+  static Future<OfferActionResult> saveOffer({
+    int? id,
+    required Map<String, dynamic> fields,
+    String? requestKey,
+  }) async {
+    final body = <String, dynamic>{...fields, if (id == null && requestKey != null) 'request_key': requestKey};
+    final d = await _req('POST', id == null ? '/api/vendor/offers/' : '/api/vendor/offers/$id/', body: body);
+    await _cacheOffersFrom(d);
+    return OfferActionResult.fromJson(d);
+  }
+
+  /// Chalu / band (seedha value bhejte hain, retry par ulta nahi hota).
+  static Future<OfferActionResult> setOfferActive(int id, bool active) async {
+    final d = await _req('POST', '/api/vendor/offers/$id/toggle/', body: {'active': active});
+    await _cacheOffersFrom(d);
+    return OfferActionResult.fromJson(d);
+  }
+
+  static Future<OfferActionResult> deleteOffer(int id) async {
+    final d = await _req('POST', '/api/vendor/offers/$id/delete/');
+    await _cacheOffersFrom(d);
+    return OfferActionResult.fromJson(d);
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V14: reviews & ratings
+  // ------------------------------------------------------------------
+
+  /// Reviews ka ek page. [filter]: all | unanswered | replied. [stars]: 0 = sab, 1-5 = sirf itne star.
+  /// Sirf "sab, page 1" kamyab ho to phone mein bhi save hota hai (net na ho to purani list dikhane ke liye).
+  static Future<ReviewsPage> reviews({String filter = 'all', int stars = 0, int page = 1}) async {
+    final q = <String>['filter=$filter', if (stars > 0) 'stars=$stars', 'page=$page'].join('&');
+    final d = await _req('GET', '/api/vendor/reviews/?$q');
+    final out = ReviewsPage.fromJson(d);
+    if (filter == 'all' && stars == 0 && page == 1) {
+      try {
+        final p = await SharedPreferences.getInstance();
+        await p.setString(_reviewsKey, jsonEncode(d));
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// Phone mein save kiya hua aakhri (sab, page 1) reviews page (na ho ya kharab ho to null).
+  static Future<ReviewsPage?> cachedReviews() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_reviewsKey);
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? ReviewsPage.fromJson(Map<String, dynamic>.from(decoded)) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Jawab dein / badlein. [reply] khali = jawab hata dein. Zyada se zyada 300 akshar (server rokta hai).
+  static Future<ReviewReplyResult> replyReview(int id, String reply) async {
+    final d = await _req('POST', '/api/vendor/reviews/$id/reply/', body: {'reply': reply});
+    return ReviewReplyResult.fromJson(d);
   }
 
   /// Push notification token (FCM) server par register karo (app side Phase V7 mein use hoga).

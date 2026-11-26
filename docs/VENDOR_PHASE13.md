@@ -45,3 +45,37 @@ first_order_only, valid_from, valid_until (YYYY-MM-DD)`. Jawab mein `status`, `u
 3. Customer app / web par us store ke cart (Rs 500+) par `WELCOME20` lagayein: discount lage. Switch **Band** karein: ab "coupon band hai" aaye. Dobara Chalu karein.
 4. Ek order is coupon se karein, phir app mein coupon **Badlein**: code / qism / value band (lock) ho, title / limits badal jayen. **Delete** par "band kar diya" aaye (delete nahi), purana order ka discount record wahi rahe. Istemal na hua coupon delete ho jaye.
 5. Share icon se WhatsApp khule (code + shart likhi hon). Net band karke screen kholein: purani list + message aaye. Doosre vendor ka coupon kabhi na dikhe.
+
+
+---
+
+# Phase V13-B: Offers
+
+Product par waqt-wala discount (start - end tareekh). Migration **0064** (sirf nayi table `ProductOffer`), koi purani table / column nahi chhui.
+
+## API (sab Bearer token, sirf apne products / offers, unapproved vendor 403)
+| Method | URL | Kaam |
+|---|---|---|
+| GET | `/api/vendor/offers/` | `{summary, offers[], limits}` |
+| POST | `/api/vendor/offers/` | naya offer: `product_id, discount_percent, starts_on?, ends_on, request_key?` |
+| GET | `/api/vendor/offers/products/?q=` | offer ke liye products (approved + chalu) + `max_percent` |
+| POST | `/api/vendor/offers/<id>/` | badlein (`discount_percent, ends_on, starts_on?`) |
+| POST | `/api/vendor/offers/<id>/toggle/` | `{active}` chalu / band |
+| POST | `/api/vendor/offers/<id>/delete/` | delete |
+
+Offer `state`: `live | scheduled | paused | ended`. `ends_on` aakhri din (shamil).
+
+## Usool
+- Product ki `price / discount_percentage / original_price` kabhi nahi badalti. Customer ko dikhate waqt `app/customer/offers.py` memory mein discount lagata hai; `Product.save()` asli value wapas rakhta hai.
+- Asar = max(product ka apna discount, offer %). Offer sirf live + waqt ke andar + product approved/active par.
+- Ek product par ek waqt mein ek hi offer (overlap 409). Khatam offer na badalta hai na dobara chalu hota hai.
+- Customer ke paths jo offer dikhate hain: `get_product_final_price` (cart / buy-now / reorder), store page, shop home, product detail, related, recently viewed.
+- Cart mein pehle se maujood item ki price add karne ke waqt wali rehti hai (mojooda product-discount jaisa hi).
+- Offer % ki hadd commission ke hisaab se (`VENDOR_OFFER_CAP_TO_COMMISSION`, default True) taake shop ka commission minus na ho.
+
+## Test (5 steps)
+1. `python manage.py migrate` (0064 lagni chahiye) aur `python manage.py test app.tests_vendor_offers app.tests_vendor_coupons`.
+2. App: More > Offers > Naya offer > product, 10%, aaj se 3 din.
+3. Customer app / web par us store ka product kholein: kam price + OFF badge.
+4. Offer band karein (switch) -> price foran pehli jaisi. Doosre vendor ke token se offer 404.
+5. Web par wohi product vendor portal mein dekhein: price / discount badle nahi hote.

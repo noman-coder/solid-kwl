@@ -52,6 +52,7 @@ from ..models import (
     AdminPresence, DeliverySettings, DeliveryArea
 )
 
+from . import offers as vendor_offers
 from .payment_options import get_payment_options, clean_payment_method
 from .checkout_cart import get_checkout_cart
 from ..decorators import customer_login_required
@@ -632,6 +633,7 @@ def enrich_recently_viewed_with_prices(recently_viewed, cart=None):
             except (ValueError, TypeError):
                 pass
     
+    vendor_offers.overlay(recently_viewed)
     for product in recently_viewed:
         if product.id in rv_price_map:
             base_price = rv_price_map[product.id]
@@ -679,8 +681,14 @@ def get_product_final_price(product):
     else:
         base_price = product.price
     
-    if product.discount_percentage and product.discount_percentage > 0:
-        discount_amount = base_price * (product.discount_percentage / Decimal('100'))
+    discount = product.discount_percentage
+    if not hasattr(product, 'offer_percent'):        # offer (V13-B) abhi memory mein nahi laga -> yahin laga lo
+        try:
+            discount = vendor_offers.effective_discount(product)
+        except Exception:
+            discount = product.discount_percentage
+    if discount and discount > 0:
+        discount_amount = base_price * (discount / Decimal('100'))
         return base_price - discount_amount
     return base_price
 
@@ -886,6 +894,7 @@ def shop_home(request):
         except (ValueError, TypeError):
             pass
     
+    vendor_offers.overlay(list(page_obj))
     for product in page_obj:
         product.available_stock = product.total_stock or 0
         
@@ -1035,6 +1044,7 @@ def _price_products(items):
     items = list(items)
     if not items:
         return items
+    vendor_offers.overlay(items)
     ids = [p.id for p in items]
     best = {bp['product_id']: bp['best_price'] for bp in StockBatch.objects.filter(
         product_id__in=ids, remaining_qty__gt=0, selling_price__gt=0
@@ -1082,6 +1092,7 @@ def product_detail(request, pk):
         total=Sum('stock')
     )['total'] or 0
     product.available_stock = total_stock
+    vendor_offers.overlay([product])
     
     batch = StockBatch.objects.filter(
         product=product,
@@ -1113,6 +1124,7 @@ def product_detail(request, pk):
     ).exclude(id=product.id).select_related('category', 'brand')[:8]
     
     if related:
+        vendor_offers.overlay(related)
         related_ids = [p.id for p in related]
         
         related_batch_prices = StockBatch.objects.filter(

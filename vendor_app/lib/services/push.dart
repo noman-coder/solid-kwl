@@ -42,8 +42,10 @@ class PushTarget {
   bool get isNewOrder => type == 'new_order';
 
   /// Tap par Order Detail khulni chahiye.
-  bool get hasOrder =>
-      orderId > 0 && (type == 'new_order' || type == 'order_cancelled' || type == 'review');
+  bool get hasOrder => orderId > 0 && (type == 'new_order' || type == 'order_cancelled');
+
+  /// Naye review ka alert: tap par Reviews screen khulni chahiye (jawab wahin se diya jata hai).
+  bool get isReview => type == 'review';
 
   bool get isStock => type == 'low_stock' || type == 'out_of_stock' || type == 'stock_summary';
 

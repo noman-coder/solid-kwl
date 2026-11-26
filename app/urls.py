@@ -1224,6 +1224,15 @@ urlpatterns = [
      path('api/vendor/coupons/<int:pk>/', views_vendor_api.api_coupon_edit, name='vendor_api_coupon_edit'),
      path('api/vendor/coupons/<int:pk>/toggle/', views_vendor_api.api_coupon_toggle, name='vendor_api_coupon_toggle'),
      path('api/vendor/coupons/<int:pk>/delete/', views_vendor_api.api_coupon_delete, name='vendor_api_coupon_delete'),
+     # Phase V13-B: offers
+     path('api/vendor/offers/', views_vendor_api.api_offers, name='vendor_api_offers'),
+     path('api/vendor/offers/products/', views_vendor_api.api_offer_products, name='vendor_api_offer_products'),
+     path('api/vendor/offers/<int:pk>/', views_vendor_api.api_offer_edit, name='vendor_api_offer_edit'),
+     path('api/vendor/offers/<int:pk>/toggle/', views_vendor_api.api_offer_toggle, name='vendor_api_offer_toggle'),
+     path('api/vendor/offers/<int:pk>/delete/', views_vendor_api.api_offer_delete, name='vendor_api_offer_delete'),
+     # Phase V14: reviews (list / jawab)
+     path('api/vendor/reviews/', views_vendor_api.api_reviews, name='vendor_api_reviews'),
+     path('api/vendor/reviews/<int:pk>/reply/', views_vendor_api.api_review_reply, name='vendor_api_review_reply'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

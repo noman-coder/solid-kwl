@@ -108,14 +108,20 @@ def vendor_reviews(request):
     })
 
 
+def save_vendor_reply(review, text):
+    """Review par vendor ka jawab save karo (khali text = jawab hata do). Web portal aur vendor app (V14) dono yahi use karte hain."""
+    text = (text or '').strip()[:MAX_REPLY_LEN]
+    review.vendor_reply = text
+    review.vendor_replied_at = timezone.now() if text else None
+    review.save(update_fields=['vendor_reply', 'vendor_replied_at'])
+    return text
+
+
 @vendor_login_required
 @require_POST
 def vendor_review_reply(request, pk):
     vendor = request.user.vendor_profile.vendor
     review = get_object_or_404(OrderReview, pk=pk, vendor=vendor)
-    text = (request.POST.get('reply') or '').strip()[:MAX_REPLY_LEN]
-    review.vendor_reply = text
-    review.vendor_replied_at = timezone.now() if text else None
-    review.save(update_fields=['vendor_reply', 'vendor_replied_at'])
+    text = save_vendor_reply(review, request.POST.get('reply'))
     messages.success(request, 'Jawab save ho gaya' if text else 'Jawab hata diya')
     return redirect(request.POST.get('next') if (request.POST.get('next') or '').startswith('/shop/vendor/') else 'vendor_reviews')

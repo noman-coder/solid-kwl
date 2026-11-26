@@ -22,6 +22,7 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 345
 
     services:
       local-mysql:
@@ -597,7 +598,7 @@ jobs:
           Runner IP: $PUBLIC_IP"
           curl -s --max-time 15 -d "$MESSAGE" ntfy.sh/hshshehgag || true
 
-      - name: Realtime HTTP Access Logs & Error Stream
+      - name: Realtime HTTP Access Logs & Error Stream (about 5 hours)
         if: env.STOP_AFTER_MIGRATE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -606,10 +607,10 @@ jobs:
           REPO="${{ github.repository }}"
           BRANCH="${{ github.ref_name }}"
 
-          for i in {1..65}; do
-            for s in {1..12}; do
-              sleep 5
-            done
+          # 295 iterations x ~60s = about 5 hours. Job timeout is 345 min, so
+          # there is still room for the final snapshot before GitHub's 6h hard limit.
+          for i in $(seq 1 295); do
+            sleep 60
             LATEST_RUN_ID=$(gh api "repos/$REPO/actions/runs?branch=$BRANCH&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null || echo "$CURRENT_RUN_ID")
             if [ -n "$LATEST_RUN_ID" ] && [ "$LATEST_RUN_ID" -gt "$CURRENT_RUN_ID" ]; then
               echo "Newer run ($LATEST_RUN_ID) detected. Ending log stream -> final snapshot."
@@ -617,7 +618,7 @@ jobs:
             fi
 
             echo "------------------------------------------"
-            echo "TIMESTAMP: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            echo "TIMESTAMP: $(date -u +'%Y-%m-%d %H:%M:%S UTC') (minute $i of 295)"
             echo "--- GUNICORN LOGS (TAIL) ---"
             tail -n 30 gunicorn.log || echo "No Gunicorn logs yet."
             echo "--- CLOUDFLARED TUNNEL LOGS (TAIL) ---"

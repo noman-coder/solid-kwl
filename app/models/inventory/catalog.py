@@ -193,6 +193,12 @@ class Product(models.Model):
         return f"{status} {self.name} (Barcode: {self.barcode or 'N/A'})"
     
     def save(self, *args, **kwargs):
+        # Vendor offer (V13-B) sirf customer ko dikhane ke liye memory mein discount_percentage badalta hai;
+        # save se pehle asli (permanent) discount wapas, taake offer kabhi DB mein na likha jaye.
+        _real = getattr(self, '_offer_real_discount', None)
+        if _real is not None:
+            self.discount_percentage = _real
+            self._offer_real_discount = None
         # ========================================== #
         # ✅ DISCOUNT PRICE AUTO-CALCULATE            #
         # ========================================== #

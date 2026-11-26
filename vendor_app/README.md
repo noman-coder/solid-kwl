@@ -1,7 +1,7 @@
 # Vendor App (Khanewal Connect - Android)
 
 Store owner (vendor) ke liye app. Rider app ke dhanche par bani hai; backend JSON API `api/vendor/...` hai
-(`app/customer/views_vendor_api.py`). Abhi **Phase V13 (coupons)**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)** + **Stock section (kam / khatam list, stock add / kam, kai products ek saath, kam-stock ki hadd, history)** + **Sales tab (bikri, cash vs online, profit, commission, statement, CSV / PDF share)** + **Rider cash (rider ka COD cash confirm / reject, history)** + **Coupons (banao / badlo / chalu-band / delete, preview, WhatsApp share)**.
+(`app/customer/views_vendor_api.py`). Abhi **Phase V14 (reviews & ratings)**: foundation (login, 5-tab shell, APK build) + **Dashboard tab** + **Orders tab** + **Order detail + live tracking** + **Push notifications (app band ho tab bhi naya order alert)** + **Products tab (list, search, filters, show/hide, quick update)** + **Product add / edit form (step-wise: Basic / Rate-Stock / Photo / Review)** + **product ki photo (camera / gallery, crop, compress, progress, retry)** + **Stock section (kam / khatam list, stock add / kam, kai products ek saath, kam-stock ki hadd, history)** + **Sales tab (bikri, cash vs online, profit, commission, statement, CSV / PDF share)** + **Rider cash (rider ka COD cash confirm / reject, history)** + **Coupons (banao / badlo / chalu-band / delete, preview, WhatsApp share)** + **Offers (product par start-end tareekh wala discount)** + **Reviews (customers ki rating dekhna aur jawab dena)**.
 Baqi (More ke andar ka kaam) aglay phases mein bharega.
 
 - App ka naam (placeholder): **Vendor App** - `.github/workflows/build_vendor_apk.yml` ke `env: APP_NAME` se badlein (sirf ek jagah).
@@ -38,9 +38,16 @@ Baqi (More ke andar ka kaam) aglay phases mein bharega.
   Photo badalne par (auto-approve band ho to) product dobara admin review mein jata hai - form pehle hi bata deta hai. Edit mein photo na chunein to purani photo bani rehti hai.
   Camera system camera app se khulta hai aur Android 13+ par gallery system photo picker se - is liye CAMERA / gallery ki alag permission manifest mein nahi.
 - **Push notifications (V7):** login ke baad phone ka FCM token server par register (token badle to dobara, logout par hat jata hai). App band / screen lock / background - teeno haalat mein naya order, cancel, rider cash, review, stock ka alert.
-  Do channel: **Naye orders** (alag "ding-dong" awaaz + lambi vibration) aur **Baqi updates**. Notification par **tap -> seedha wohi order** (app band, background ya khuli - teeno haalat). App khuli ho to upar **in-app banner + awaaz**
+  Do channel: **Naye orders** (alag "ding-dong" awaaz + lambi vibration) aur **Baqi updates**. Notification par **tap -> seedha wohi order** (naye review ka alert **Reviews screen** kholta hai) (app band, background ya khuli - teeno haalat). App khuli ho to upar **in-app banner + awaaz**
   (poll aur push mil kar ek hi baar bajate hain). Login ke baad ek dafa **notification ijazat ka saaf screen** (Android 13+), **More > Alerts & permissions** mein ijazat, **Battery: Unrestricted** aur "is phone ka alert server se juda hai?" ka status + Xiaomi/Oppo/Vivo/Samsung ki madad.
   Do phone par ek vendor login ho to dono ko alert. Logout ke baad us phone par alert nahi. Firebase secret na ho to app pehle jaisi chalti hai (sirf poll).
+
+- **Offers (V13-B):** More > **Offers**. Product chunein (sirf approved + chalu), discount % (chips: 5/10/15/20/25/30), shuru aur khatam ki tareekh, neeche
+  **"Customer ko aise dikhega"** preview. Card par chalu/band switch, tap = badlein, WhatsApp share, delete. Chips: Sab / Chalu / Jald shuru / Khatam.
+  Offer product ki asli price kabhi nahi badalta: customer ko sirf us dauran kam price + OFF badge dikhta hai, khatam hote hi price khud pehli jaisi.
+  **Do discount jama nahi hote** - product ka apna discount ho to jo bara ho wohi lagta hai. Ek product par ek waqt mein ek hi offer (peeche-peeche theek hain).
+  Hadd: 1% se, zyada se zyada 90 din, aur discount ki oopri hadd = commission ke hisaab se (neeche dekhein). Chalu offer ki shuruaat nahi badalti; khatam offer dobara chalu nahi hota.
+  Cart mein jo item pehle se hai us ki price add karne ke waqt wali rehti hai (product discount ka bhi yahi usool hai).
 
 ## GitHub par APK banane ka tareeqa
 1. Pura project (`vendor_app` + `.github/workflows/build_vendor_apk.yml`) GitHub repo mein push karein.
@@ -55,8 +62,8 @@ Baqi (More ke andar ka kaam) aglay phases mein bharega.
 5. Phone mein install karein (Unknown sources allow karna hoga).
 
 ## Folder
-`lib/main.dart`, `theme.dart`, `utils.dart` | `lib/services` (api, app_state, push) | `lib/models` (vendor, dashboard, orders, order_detail, products, stock, sales) |
-`lib/screens` (login, shell, dashboard, orders, order_detail, products, product_form, stock, sales, pending, more, placeholder_tab, notification_permission, permissions_help) |
+`lib/main.dart`, `theme.dart`, `utils.dart` | `lib/services` (api, app_state, push) | `lib/models` (vendor, dashboard, orders, order_detail, products, stock, sales, rider_cash, coupons, offers) |
+`lib/screens` (login, shell, dashboard, orders, order_detail, products, product_form, stock, sales, rider_cash, coupons, offers, pending, more, placeholder_tab, notification_permission, permissions_help) |
 `lib/widgets` (empty_state, skeleton, notice_card, loading, section_title, stat_card, week_chart, sales_charts, status_stepper, live_map, in_app_banner) |
 `tool/` (patch_gradle, patch_manifest, patch_push, patch_notification + `res/new_order.wav` - workflow `flutter create` ke baad chalata hai) | `assets/icon/`.
 Tafseel: `docs/VENDOR_PHASE3.md` (foundation), `docs/VENDOR_PHASE4.md` (dashboard), `docs/VENDOR_PHASE5.md` (orders), `docs/VENDOR_PHASE6.md` (order detail + live tracking), `docs/VENDOR_PHASE7.md` (push notifications).
@@ -86,5 +93,22 @@ Tafseel: `docs/VENDOR_PHASE3.md` (foundation), `docs/VENDOR_PHASE4.md` (dashboar
 ## Phase V13: Coupons (More > Promotion > Coupons)
 - Apne store ke coupons: percent / Rs off / free delivery, kam az kam order, kul istemal ki hadd, har customer ki hadd, sirf pehla order, shuru / khatam ki tareekh. Banate waqt **preview** ("Customer ko aise dikhega").
 - Card par usage bar, ab tak di gayi chhoot, **chalu / band switch**, code copy, **WhatsApp share**. Istemal ho chuka coupon delete nahi hota (band hota hai) aur uska code / qism / value badal nahi sakta.
-- Validation aur checkout web wala hi (`_clean_vendor_coupon`, `coupons.evaluate`). **Offers (V13-B) abhi nahi** - woh alag sub-step hai (migration 0064).
+- Validation aur checkout web wala hi (`_clean_vendor_coupon`, `coupons.evaluate`).
 - Sust net / VPN par GET requests khud ek dafa dobara try hoti hain. Tafseel + test: `docs/VENDOR_PHASE13.md`.
+
+## Phase V13-B: Offers (More > Promotion > Offers)
+- Product par waqt-wala discount: product chunein, discount %, shuru / khatam tareekh. Customer ko kam price + OFF badge sirf us dauran; khatam hote hi price khud pehli jaisi. **Product ki asli price / discount DB mein kabhi nahi badalti.**
+- Asar = max(product ka apna discount, offer %) - jama nahi hote. Ek product par ek waqt mein ek offer. Zyada se zyada 90 din, 100 offers.
+- **Commission ki hadd:** vendor ka hissa stock batch ke 'cost' mein pehle se tay hota hai, offer use nahi badalta; is liye offer price vendor ke hisse se neeche jaye to shop ka commission minus ho jata. Default mein offer % ki oopri hadd `100 x (1 - (1-d)(1-c))` hai (c = vendor ka commission, d = product ka discount). Hadd hatani ho to settings mein `VENDOR_OFFER_CAP_TO_COMMISSION = False` (tab 70% tak).
+- Backend: `app/customer/offers.py` (engine), `ProductOffer` table (migration **0064**, sirf nayi table), `api/vendor/offers/...`. Customer side: `get_product_final_price`, store page, shop home, product detail. `Product.save()` offer ko kabhi DB mein nahi likhta.
+- Tests: `python manage.py test app.tests_vendor_offers`.
+
+
+## Phase V14: Reviews & ratings (More > Customers > Reviews)
+- Upar card: **average rating** + 5-1 star ki patti (patti par tap = sirf us star ke reviews; dobara tap = hata do). Chips: **Sab / Jawab nahi diya / Jawab diya** (har ek par ginti).
+- Review card: customer ka naam (privacy ke liye **"Hadi A."** - phone / address kabhi nahi), star, order no, waqt, comment, **"Order dekhein"**.
+- **Jawab dein / badlein / hatayein:** bottom sheet, 300 akshar tak (counter ke saath), "jaldi jawab" ke 2 nuskhe (4-5 star aur 1-3 star ke liye alag). Jawab customer ko store page par dikhta hai.
+  Khali karke bhejne par jawab hat jata hai. Lamba jawab server chupke kaat nahi deta, saaf error deta hai.
+- Naye review par push (V2) ab tap par seedha **Reviews screen** kholti hai (pehle order detail). Pull-to-refresh, agla page (20-20), skeleton, empty, error + retry, net band par purani list + message.
+- Backend: `GET /api/vendor/reviews/`, `POST /api/vendor/reviews/<id>/reply/` (`views_vendor_api.py`), jawab save karne ki logic web wali `views_extras.save_vendor_reply`. Koi migration nahi.
+- Tests: `python manage.py test app.tests_vendor_reviews`. Tafseel: `docs/VENDOR_PHASE14.md`.

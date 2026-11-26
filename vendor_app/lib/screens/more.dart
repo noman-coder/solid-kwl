@@ -7,10 +7,12 @@ import '../theme.dart';
 import '../utils.dart';
 import '../widgets/section_title.dart';
 import 'coupons.dart';
+import 'offers.dart';
 import 'permissions_help.dart';
+import 'reviews.dart';
 import 'rider_cash.dart';
 
-/// More tab: store ka chhota card, Rider cash (Phase V12), Coupons (Phase V13), aglay phases ki list (jald), logout, version.
+/// More tab: store ka chhota card, Rider cash (Phase V12), Coupons + Offers (Phase V13), Reviews (Phase V14), aglay phases ki list (jald), logout, version.
 class MoreScreen extends StatelessWidget {
   final VoidCallback onLogout;
   const MoreScreen({super.key, required this.onLogout});
@@ -39,6 +41,7 @@ class MoreScreen extends StatelessWidget {
     final state = AppScope.of(context);
     final v = state.vendor;
     final cashPending = state.dashboard?.riderCash.count ?? 0;
+    final ratingCount = v?.ratingCount ?? 0;
     return RefreshIndicator(
       onRefresh: state.refresh,
       child: ListView(
@@ -81,12 +84,35 @@ class MoreScreen extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right),
             ),
           ),
+          Card(
+            child: ListTile(
+              onTap: () => openOffersScreen(context),
+              leading: const Icon(Icons.bolt_outlined, color: kTeal),
+              title: const Text('Offers', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Product par kuch din ka discount (start - end tareekh)',
+                  style: TextStyle(color: Colors.black54, fontSize: 12.5)),
+              trailing: const Icon(Icons.chevron_right),
+            ),
+          ),
+          const SectionTitle('Customers'),
+          Card(
+            child: ListTile(
+              onTap: () => openReviewsScreen(context),
+              leading: const Icon(Icons.star_outline_rounded, color: kTeal),
+              title: const Text('Reviews', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                (v != null && ratingCount > 0)
+                    ? 'Rating ${v.rating.toStringAsFixed(1)} ($ratingCount reviews) - dekhein aur jawab dein'
+                    : 'Customers ki rating dekhein aur jawab dein',
+                style: const TextStyle(color: Colors.black54, fontSize: 12.5),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+            ),
+          ),
           const SectionTitle('Jald aa raha hai'),
           const Card(
             child: Column(
               children: [
-                _SoonTile(icon: Icons.star_outline, title: 'Reviews'),
-                Divider(height: 1),
                 _SoonTile(icon: Icons.storefront_outlined, title: 'Store settings'),
                 Divider(height: 1),
                 _SoonTile(icon: Icons.person_outline, title: 'Profile & help'),

@@ -15,6 +15,7 @@ from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404, render
 
 from ..models import Category, CompanyInfo, Product, ShopBanner, StoreCategory, VendorProfile
+from . import offers as vendor_offers
 from .views_customer_portal import get_cart_count_value, get_delivery_area, get_product_final_price
 from .views_reviews import store_rating_map, store_reviews
 from .geo import attach_distances, format_distance, get_customer_location, haversine_km
@@ -231,6 +232,7 @@ def store_detail(request, pk):
     for key, item in cart.items():
         if (item.get('vendor_id') or 0) == store.vendor_id:
             cart_state[str(key)] = {'qty': int(item.get('quantity', 0) or 0), 'price': float(item.get('price', 0) or 0)}
+    vendor_offers.overlay(list(page_obj))
     for p in page_obj:
         p.final_price = get_product_final_price(p)
         p.has_discount = bool(p.discount_percentage and p.discount_percentage > 0)
