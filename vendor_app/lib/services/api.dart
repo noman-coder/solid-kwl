@@ -15,6 +15,7 @@ import '../models/products.dart';
 import '../models/rider_cash.dart';
 import '../models/sales.dart';
 import '../models/stock.dart';
+import '../models/store_settings.dart';
 import '../models/vendor.dart';
 import '../utils.dart';
 
@@ -88,6 +89,7 @@ class Api {
   static const String _couponsKey = 'vendor_coupons_cache';
   static const String _offersKey = 'vendor_offers_cache';
   static const String _reviewsKey = 'vendor_reviews_cache';
+  static const String _storeKey = 'vendor_store_cache';
 
   static Future<void> _save() async {
     final p = await SharedPreferences.getInstance();
@@ -195,6 +197,30 @@ class Api {
     return _decode(r);
   }
 
+  /// Kai files (logo / banner) ke saath POST (multipart). Fields sirf text; files: {field naam: File}.
+  static Future<Map<String, dynamic>> _multipartFiles(String path,
+      {required Map<String, dynamic> fields, required Map<String, File> files, void Function(double)? onProgress}) async {
+    http.Response r;
+    try {
+      final req = _ProgressMultipartRequest('POST', _u(path), onProgress: (sent, total) {
+        if (onProgress != null && total > 0) onProgress((sent / total).clamp(0.0, 1.0).toDouble());
+      });
+      req.headers['Accept'] = 'application/json';
+      if (token != null) req.headers['Authorization'] = 'Bearer $token';
+      fields.forEach((k, v) {
+        if (v != null) req.fields[k] = v.toString();
+      });
+      for (final e in files.entries) {
+        req.files.add(await http.MultipartFile.fromPath(e.key, e.value.path, filename: '${e.key}.jpg'));
+      }
+      final streamed = await req.send().timeout(const Duration(seconds: 120));
+      r = await http.Response.fromStream(streamed).timeout(const Duration(seconds: 120));
+    } catch (_) {
+      throw ApiException('Internet ya server se rabta nahi ho raha. Photo upload nahi hui.', 0, code: 'network');
+    }
+    return _decode(r);
+  }
+
   // ------------------------------------------------------------------
   // Phase V1 / V2 ki API (baqi endpoints aglay phases mein yahin judenge)
   // ------------------------------------------------------------------
@@ -266,6 +292,7 @@ class Api {
       await p.remove(_couponsKey); // Phase V13: coupons ki purani list bhi
       await p.remove(_offersKey); // Phase V13-B: offers ki purani list bhi
       await p.remove(_reviewsKey); // Phase V14: reviews ki purani list bhi
+      await p.remove(_storeKey); // Phase V15: store settings ki purani copy bhi
       for (final k in kSalesPeriods) {
         await p.remove('$_salesKeyPrefix$k'); // Phase V11: sales ka purana data bhi (doosra vendor login kare to)
       }
@@ -729,5 +756,84 @@ class Api {
   /// Push notification token (FCM) server par register karo (app side Phase V7 mein use hoga).
   static Future<void> registerPushToken(String pushToken) async {
     await _req('POST', '/api/vendor/push-token/', body: {'token': pushToken, 'platform': 'android'});
+  }
+
+  // ------------------------------------------------------------------
+  // Phase V15: Store settings (basic / timing / delivery / branding) + location verify
+  // ------------------------------------------------------------------
+
+  /// Poori store settings. Kamyab jawab phone mein bhi save hota hai (net na ho to purani settings dikhane ke liye).
+  static Future<StorePage> storeSettings() async {
+    final d = await _req('GET', '/api/vendor/store/');
+    final page = StorePage.fromJson(d);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_storeKey, jsonEncode(d));
+    } catch (_) {}
+    return page;
+  }
+
+  static Future<StorePage?> cachedStoreSettings() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_storeKey);
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? StorePage.fromJson(Map<String, dynamic>.from(decoded)) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Ek section save: [section] = basic | timing | delivery. Server ghalti par ApiException (errors ki list ke saath).
+  static Future<StoreSaveResult> saveStoreSection(String section, Map<String, dynamic> fields) async {
+    final d = await _req('POST', '/api/vendor/store/', body: {...fields, 'section': section});
+    return _storeSaved(d);
+  }
+
+  /// Logo / banner: nayi file dein ya [removeLogo] / [removeCover] se hatayein.
+  static Future<StoreSaveResult> saveStoreBranding({
+    File? logo,
+    File? cover,
+    bool removeLogo = false,
+    bool removeCover = false,
+    void Function(double)? onProgress,
+  }) async {
+    final d = await _multipartFiles(
+      '/api/vendor/store/',
+      fields: {
+        'section': 'branding',
+        if (removeLogo) 'remove_logo': '1',
+        if (removeCover) 'remove_cover': '1',
+      },
+      files: {if (logo != null) 'logo': logo, if (cover != null) 'cover_image': cover},
+      onProgress: onProgress,
+    );
+    return _storeSaved(d);
+  }
+
+  /// Store ki location verify (blue tick). Vendor ka ittefaq (consent) zaroori.
+  static Future<StoreSaveResult> verifyStoreLocation(double lat, double lng, double? accuracy) async {
+    final d = await _req('POST', '/api/vendor/store/location/',
+        body: {'lat': lat, 'lng': lng, if (accuracy != null) 'accuracy': accuracy, 'consent': true});
+    return _storeSaved(d);
+  }
+
+  static Future<StoreSaveResult> _storeSaved(Map<String, dynamic> d) async {
+    // taza settings phone mein bhi rakh lo (purani cache na dikhe)
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_storeKey);
+      if (raw != null && raw.isNotEmpty) {
+        final old = jsonDecode(raw);
+        if (old is Map) {
+          final merged = Map<String, dynamic>.from(old);
+          merged['settings'] = d['settings'];
+          merged['store'] = d['store'];
+          await p.setString(_storeKey, jsonEncode(merged));
+        }
+      }
+    } catch (_) {}
+    return StoreSaveResult.fromJson(d);
   }
 }

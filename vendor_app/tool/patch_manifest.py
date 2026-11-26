@@ -10,12 +10,15 @@ path = sys.argv[1]
 app_name = sys.argv[2] if len(sys.argv) > 2 else 'Vendor App'
 s = open(path, encoding='utf-8').read()
 
-# Vendor ko GPS / background location nahi chahiye (woh rider app ka kaam hai).
+# Vendor ko background location nahi chahiye (woh rider app ka kaam hai). Phase V15: store ki location verify ke liye
+# sirf foreground GPS (button dabane par ek dafa) - ACCESS_FINE / COARSE.
 PERMS = [
     'android.permission.INTERNET',
     'android.permission.POST_NOTIFICATIONS',
     'android.permission.WAKE_LOCK',
     'android.permission.VIBRATE',
+    'android.permission.ACCESS_COARSE_LOCATION',
+    'android.permission.ACCESS_FINE_LOCATION',
     # Phase V7: 'Battery unrestricted' ki ijazat (permissions_help screen) - naye order ka alert band na ho
     'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
 ]

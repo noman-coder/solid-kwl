@@ -177,6 +177,13 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Phase V15: store settings / location badli - naya vendor (naam, blue tick, status) foran dikhao, phir dashboard taza.
+  Future<void> applyStoreChange(Vendor? v) async {
+    if (v != null) vendor = v;
+    if (!_disposed) notifyListeners();
+    await loadDashboard();
+  }
+
   /// Store Open / Closed switch. Kamyab ho to foran naya status dikhta hai, phir warnings taza hoti hain.
   Future<void> setStoreOpen(bool open) async {
     if (storeSwitching) return;

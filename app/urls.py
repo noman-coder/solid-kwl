@@ -1231,6 +1231,9 @@ urlpatterns = [
      path('api/vendor/offers/<int:pk>/toggle/', views_vendor_api.api_offer_toggle, name='vendor_api_offer_toggle'),
      path('api/vendor/offers/<int:pk>/delete/', views_vendor_api.api_offer_delete, name='vendor_api_offer_delete'),
      # Phase V14: reviews (list / jawab)
+     path('api/vendor/store/', views_vendor_api.api_store, name='vendor_api_store'),
+     path('api/vendor/store/location/', views_vendor_api.api_store_location, name='vendor_api_store_location'),
+
      path('api/vendor/reviews/', views_vendor_api.api_reviews, name='vendor_api_reviews'),
      path('api/vendor/reviews/<int:pk>/reply/', views_vendor_api.api_review_reply, name='vendor_api_review_reply'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),

@@ -27,6 +27,9 @@ Phase V13: coupons - list (+ summary), create, edit, toggle (chalu / band), dele
 Phase V14: reviews - list (rating ka khulasa, 5-1 star bars, filter: sab / jawab nahi diya / jawab diya, star, page) aur reply
           (jawab dein / badlein / hatayein). Logic web ki `views_extras.save_vendor_reply` hi hai; customer ka naam privacy ke liye
           'Hadi A.' jaisa. Naye review par push pehle se (V2 `notify_new_review`). Koi migration nahi.
+Phase V15: store settings - GET/POST `store/` (section-wise save: basic / timing / delivery / branding) aur `store/location/`
+          (blue-tick location verify). Validation web ki `vendor_store_settings` / `vendor_location_verify` wali hi hai
+          (`_parse_time`, `_parse_money`, `_areas_from_post`, `_validate_image`, `parse_coords`). Koi migration nahi.
 Logic wahi hai jo views_vendor_portal.vendor_login ka hai (phone + password, lockout), bas JSON mein.
 Token Django ke signing se banta hai (salt 'vendor-api-v1', 30 din; vendor ka password badalne par
 purane token khud band ho jate hain).
@@ -56,26 +59,27 @@ from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, F, FloatField, OuterRef, Q, Subquery, Sum, Value, When
 from django.db.models.functions import Coalesce, TruncDate
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from ..models import (Brand, Category, Coupon, CouponRedemption, DeliveryInfo, Inventory, OrderTracking, Product,
-                      RiderCashHandover, RiderProfile, SaleOrder, SaleOrderItem, Unit, VendorProfile, VendorPushToken,
-                      VendorStockLog, ProductOffer, OrderReview)
+from ..models import (Brand, Category, Coupon, CouponRedemption, DeliveryArea, DeliveryInfo, Inventory, OrderTracking,
+                      Product, RiderCashHandover, RiderProfile, SaleOrder, SaleOrderItem, StoreCategory, Unit,
+                      VendorProfile, VendorPushToken, VendorStockLog, ProductOffer, OrderReview)
 from ..vendor_commission import CENT, HUNDRED, commission_percent, vendor_earnings
 from . import offers as offers_engine, store_orders, vendor_stock
 from .views_customer_auth import get_client_ip, normalize_phone
 from .views_coupons import MAX_VENDOR_COUPONS, _clean_vendor_coupon
 from .views_extras import MAX_REPLY_LEN, save_vendor_reply
+from .geo import max_accuracy_m, parse_coords
 from .views_reviews import _reviewer_name, vendor_rating
 from .views_vendor_portal import (
     LOGIN_LOCK_SECONDS, LOGIN_MAX_ATTEMPTS, MASTER_MODELS, MAX_IMAGE_BYTES, MAX_PRICE, ORDER_TABS,
-    _apply_product_edit, _auto_approve_products, _clean_product_form, _err_text, _login_key, _save_new_product,
-    _stock_warehouse, create_master_entry,
+    _apply_product_edit, _areas_from_post, _auto_approve_products, _clean_product_form, _err_text, _login_key,
+    _parse_money, _parse_time, _save_new_product, _stock_warehouse, _validate_image, create_master_entry,
 )
 from .views_vendor_tools import (DONE_STATUSES, LOW_STOCK_DEFAULT, OPEN_STATUSES, _analytics_data, _csv_safe, _stock_rows,
                                  quick_update_product)
@@ -2823,3 +2827,318 @@ def api_review_reply(request, profile, pk):
         'review': _review_json(rv),
         'summary': _reviews_summary(profile.vendor),
     })
+
+
+# ================================================================
+# Phase V15 - Store settings (basic / timing / delivery / branding) + location verify (blue tick)
+# Naya business logic nahi: validation web ke `vendor_store_settings` / `vendor_location_verify` wali hi hai
+# (`_parse_time`, `_parse_money`, `_areas_from_post`, `_validate_image`, `parse_coords`). Har section alag save hota hai
+# (ek section ki ghalti doosre ko nahi roakti). Sirf apna profile badalta hai (token se). Koi migration nahi.
+# ================================================================
+
+STORE_SECTIONS = ('basic', 'timing', 'delivery', 'branding')
+STORE_STATUSES = ('open', 'busy', 'closed')
+STORE_DESC_MAX = 1000
+DELIVERY_MINUTES = (5, 600)
+STORE_MONEY_MAX = Decimal('99999.99')
+
+
+def _store_text(v):
+    """JSON value -> text (None -> ''); number ho to text; list/dict/bool ghalat (None wapas = ghalat)."""
+    if v is None:
+        return ''
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return v.strip()
+    return None
+
+
+def _area_groups(profile):
+    """Admin ki list: [{city, areas: [{label, selected}]}] + vendor ke apne likhe (list mein na hone wale) areas."""
+    chosen = VendorProfile.clean_areas(profile.delivery_areas)
+    chosen_l = {a.lower() for a in chosen}
+    groups = DeliveryArea.grouped()
+    listed = {a.label.lower() for _, items in groups for a in items}
+    return (
+        [{'city': city, 'areas': [{'label': a.label, 'selected': a.label.lower() in chosen_l} for a in items]}
+         for city, items in groups],
+        [a for a in chosen if a.lower() not in listed],
+        chosen,
+    )
+
+
+def _location_json(profile):
+    return {
+        'verified': bool(profile.location_verified),
+        'has_location': bool(profile.has_location),
+        'latitude': profile.latitude,
+        'longitude': profile.longitude,
+        'accuracy_m': profile.location_accuracy_m,
+        'verified_at': _iso(profile.location_verified_at),
+        'max_accuracy_m': int(max_accuracy_m()),
+    }
+
+
+def _store_settings_json(profile):
+    groups, extra, chosen = _area_groups(profile)
+    cat = profile.store_category
+    return {
+        'name': profile.business_name,
+        'city': profile.city or '',
+        'description': profile.store_description or '',
+        'category': ({'id': cat.pk, 'name': cat.name} if cat else None),
+        'status': profile.store_status,
+        'opens_at': _hhmm(profile.opens_at),
+        'closes_at': _hhmm(profile.closes_at),
+        'min_order_amount': _money(profile.min_order_amount),
+        'delivery_fee': _money(profile.delivery_fee),
+        'delivery_time_min': profile.delivery_time_min,
+        'delivery_time_max': profile.delivery_time_max,
+        'areas': chosen,
+        'area_groups': groups,
+        'areas_extra': extra,
+        'logo': _media_url(profile.logo),
+        'cover': _media_url(profile.cover_image),
+        'location': _location_json(profile),
+    }
+
+
+def _store_response(profile, message):
+    return JsonResponse({
+        'ok': True,
+        'message': message,
+        'settings': _store_settings_json(profile),
+        'store': _store_json(profile),
+        'vendor': _vendor_json(profile),
+    })
+
+
+def _store_form_error(errors):
+    return JsonResponse({'ok': False, 'error': errors[0], 'message': errors[0], 'code': 'validation',
+                         'errors': errors}, status=400)
+
+
+def _store_minutes(d, key, current, label, errors):
+    raw = d.get(key)
+    if raw is None or raw == '':
+        return current
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        errors.append(f'{label} minutes mein likhein.')
+        return current
+    try:
+        v = int(str(raw).strip())
+    except ValueError:
+        errors.append(f'{label} minutes mein likhein.')
+        return current
+    lo, hi = DELIVERY_MINUTES
+    if not lo <= v <= hi:
+        errors.append(f'{label} {lo} se {hi} minute ke beech likhein.')
+        return current
+    return v
+
+
+def _store_money(d, key, current, label, errors):
+    if key not in d:
+        return current
+    text = _store_text(d.get(key))
+    if text is None:
+        errors.append(f'{label} sahi likhein')
+        return current
+    return _parse_money(text, label, errors, maximum=STORE_MONEY_MAX)
+
+
+def _apply_basic(profile, d, request, errors):
+    fields = []
+    if 'status' in d:
+        status = _store_text(d.get('status'))
+        if status not in STORE_STATUSES:
+            errors.append('Store status open, busy ya closed hona chahiye.')
+        else:
+            profile.store_status = status
+            fields.append('store_status')
+    if 'description' in d:
+        text = d.get('description')
+        text = '' if text is None else text
+        if not isinstance(text, str):
+            errors.append('Store ki tafseel sirf text ho sakti hai.')
+        elif len(text.strip()) > STORE_DESC_MAX:
+            errors.append(f'Store ki tafseel zyada se zyada {STORE_DESC_MAX} akshar ki ho sakti hai (abhi {len(text.strip())}).')
+        else:
+            profile.store_description = text.strip()
+            fields.append('store_description')
+    if 'store_category' in d:
+        raw = _store_text(d.get('store_category'))
+        if raw in ('', '0'):
+            profile.store_category = None
+            fields.append('store_category')
+        else:
+            cat = StoreCategory.objects.filter(pk=raw, is_active=True).first() if raw and raw.isdigit() else None
+            if cat is None:
+                errors.append('Store category sahi chunein.')
+            else:
+                profile.store_category = cat
+                fields.append('store_category')
+    return fields
+
+
+def _apply_timing(profile, d, request, errors):
+    opens_raw, closes_raw = _store_text(d.get('opens_at')), _store_text(d.get('closes_at'))
+    if opens_raw is None or closes_raw is None:
+        errors.append('Opening/closing time sahi likhein.')
+        return []
+    try:
+        opens_at, closes_at = _parse_time(opens_raw), _parse_time(closes_raw)
+    except (ValueError, TypeError):
+        errors.append('Opening/closing time sahi likhein (jaise 09:00).')
+        return []
+    if bool(opens_at) != bool(closes_at):
+        errors.append('Opening aur closing dono time likhein (ya dono khali chhoden).')
+        return []
+    profile.opens_at, profile.closes_at = opens_at, closes_at
+    return ['opens_at', 'closes_at']
+
+
+def _apply_delivery(profile, d, request, errors):
+    fields = []
+    min_order = _store_money(d, 'min_order_amount', profile.min_order_amount, 'Minimum order', errors)
+    fee = _store_money(d, 'delivery_fee', profile.delivery_fee, 'Delivery fee', errors)
+    t_min = _store_minutes(d, 'delivery_time_min', profile.delivery_time_min, 'Delivery time (kam se kam)', errors)
+    t_max = _store_minutes(d, 'delivery_time_max', profile.delivery_time_max, 'Delivery time (zyada se zyada)', errors)
+    if t_min > t_max:
+        errors.append('Delivery time: kam se kam, zyada se zyada se chhota ya barabar hona chahiye.')
+    if 'areas' in d or 'areas_extra' in d:
+        picks, extra = d.get('areas'), d.get('areas_extra')
+        picks = [] if picks is None else picks
+        extra = '' if extra is None else extra
+        if not isinstance(picks, list) or not all(isinstance(a, str) for a in picks) or not isinstance(extra, str):
+            errors.append('Delivery areas ki list sahi nahi.')
+        else:
+            q = QueryDict(mutable=True)
+            q['areas_mode'] = 'pick'
+            q.setlist('delivery_areas_pick', picks)
+            q['delivery_areas_extra'] = extra
+            raw_areas = _areas_from_post(q)           # sirf admin ki list wale + vendor ke apne likhe areas (web jaisa)
+            too_many = len([x for x in raw_areas.replace('\n', ',').replace(';', ',').split(',') if x.strip()])
+            if too_many > VendorProfile.MAX_AREAS:
+                errors.append(f'Zyada se zyada {VendorProfile.MAX_AREAS} areas likh sakte hain.')
+            else:
+                profile.delivery_areas = ', '.join(VendorProfile.clean_areas(raw_areas))
+                fields.append('delivery_areas')
+    if errors:
+        return []
+    profile.min_order_amount, profile.delivery_fee = min_order, fee
+    profile.delivery_time_min, profile.delivery_time_max = t_min, t_max
+    return fields + ['min_order_amount', 'delivery_fee', 'delivery_time_min', 'delivery_time_max']
+
+
+def _apply_branding(profile, d, request, errors):
+    fields = []
+    logo, cover = request.FILES.get('logo'), request.FILES.get('cover_image')
+    for f in (logo, cover):
+        if f:
+            err = _validate_image(f)
+            if err:
+                errors.append(err)
+    if errors:
+        return []
+    flag = lambda k: str(d.get(k, '')).strip().lower() in ('1', 'true', 'yes', 'on')
+    if logo:
+        profile.logo = logo
+        fields.append('logo')
+    elif flag('remove_logo'):
+        profile.logo = None
+        fields.append('logo')
+    if cover:
+        profile.cover_image = cover
+        fields.append('cover_image')
+    elif flag('remove_cover'):
+        profile.cover_image = None
+        fields.append('cover_image')
+    if not fields:
+        errors.append('Koi nayi photo chunein ya hatane ka nishan lagayein.')
+    return fields
+
+
+_STORE_APPLY = {'basic': _apply_basic, 'timing': _apply_timing, 'delivery': _apply_delivery, 'branding': _apply_branding}
+_STORE_DONE = {
+    'basic': 'Store ki bunyadi maloomat save ho gayin.',
+    'timing': 'Store ka waqt save ho gaya.',
+    'delivery': 'Delivery ki settings save ho gayin.',
+    'branding': 'Logo / banner save ho gaya.',
+}
+
+
+@vendor_api(['GET', 'POST'])
+def api_store(request, profile):
+    """GET  /api/vendor/store/   -> poori store settings (+ category list, limits).
+    POST /api/vendor/store/   body: {section: basic|timing|delivery|branding, ...us section ke fields}
+
+    basic    : status (open|busy|closed), description (<=1000), store_category (id ya khali)
+    timing   : opens_at, closes_at ('HH:MM'; dono khali = hamesha khula; raat paar wala time bhi theek)
+    delivery : min_order_amount, delivery_fee, delivery_time_min, delivery_time_max (5-600), areas [labels], areas_extra 'text'
+    branding : multipart - logo, cover_image (file), remove_logo / remove_cover (1)
+    Jo field na bheji jaye wo badalti nahi. Har section alag save; ghalti par kuch bhi save nahi hota (400 + errors).
+    """
+    if request.method == 'GET':
+        return JsonResponse({
+            'ok': True,
+            'generated_at': now().isoformat(),
+            'settings': _store_settings_json(profile),
+            'store': _store_json(profile),
+            'categories': [{'id': c.pk, 'name': c.name} for c in StoreCategory.objects.filter(is_active=True)],
+            'limits': {
+                'description_max': STORE_DESC_MAX,
+                'max_areas': VendorProfile.MAX_AREAS,
+                'minutes_min': DELIVERY_MINUTES[0],
+                'minutes_max': DELIVERY_MINUTES[1],
+                'money_max': float(STORE_MONEY_MAX),
+                'image_max_mb': MAX_IMAGE_BYTES // (1024 * 1024),
+            },
+        })
+
+    d = _data(request)
+    section = _store_text(d.get('section')) if hasattr(d, 'get') else ''
+    if section not in STORE_SECTIONS:
+        return _err('Section sahi nahi (basic, timing, delivery ya branding).', 400, code='validation')
+    errors = []
+    with transaction.atomic():
+        locked = VendorProfile.objects.select_for_update().select_related('user', 'vendor', 'store_category').get(pk=profile.pk)
+        fields = _STORE_APPLY[section](locked, d, request, errors)
+        if errors:
+            return _store_form_error(errors)
+        if fields:
+            locked.save(update_fields=sorted(set(fields)))
+            logger.info('Vendor %s store settings (%s) saved (app)', locked.pk, section)
+    return _store_response(locked, _STORE_DONE[section])
+
+
+@vendor_api(['POST'])
+def api_store_location(request, profile):
+    """POST /api/vendor/store/location/   body: {lat, lng, accuracy, consent: true}
+
+    Store ki location verify (blue tick). Rules web `vendor_location_verify` jaise: vendor ka ittefaq (consent) zaroori,
+    sahi coordinates, GPS ghalti `max_accuracy_m` (default 500 m) se zyada na ho. Sirf location wale naye columns badalte hain.
+    """
+    d = _data(request)
+    consent = d.get('consent') if hasattr(d, 'get') else None
+    if str(consent).strip().lower() not in ('1', 'true', 'yes', 'on'):
+        return _err('Location lene se pehle aap ka ittefaq (agree) zaroori hai.', 400, code='consent')
+    lat, lng, acc, err = parse_coords(request)
+    if err:
+        return _err(err, 400, code='validation')
+    if acc is not None and acc > max_accuracy_m():
+        return _err('Location sahi tarah nahi aayi (ghalti %d meter). Store ke andar phone ka GPS/Location on kar '
+                    'ke dobara koshish karein.' % acc, 400, code='accuracy')
+    with transaction.atomic():
+        locked = VendorProfile.objects.select_for_update().select_related('user', 'vendor', 'store_category').get(pk=profile.pk)
+        locked.latitude, locked.longitude, locked.location_accuracy_m = lat, lng, acc
+        locked.location_consent_at = now()
+        locked.location_verified = True
+        locked.location_verified_at = now()
+        locked.save(update_fields=['latitude', 'longitude', 'location_accuracy_m', 'location_consent_at',
+                                   'location_verified', 'location_verified_at'])
+        logger.info('Vendor %s store location verified (app)', locked.pk)
+    return _store_response(locked, 'Aap ke store ki location verify ho gayi. Ab store naam ke saath blue tick nazar aayega.')

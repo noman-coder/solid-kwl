@@ -11,8 +11,10 @@ import 'offers.dart';
 import 'permissions_help.dart';
 import 'reviews.dart';
 import 'rider_cash.dart';
+import 'store_settings.dart';
 
-/// More tab: store ka chhota card, Rider cash (Phase V12), Coupons + Offers (Phase V13), Reviews (Phase V14), aglay phases ki list (jald), logout, version.
+/// More tab: store ka chhota card, Rider cash (Phase V12), Coupons + Offers (Phase V13), Reviews (Phase V14), Store settings (Phase V15),
+/// aglay phases ki list (jald), logout, version.
 class MoreScreen extends StatelessWidget {
   final VoidCallback onLogout;
   const MoreScreen({super.key, required this.onLogout});
@@ -109,12 +111,23 @@ class MoreScreen extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right),
             ),
           ),
+          const SectionTitle('Store'),
+          Card(
+            child: ListTile(
+              onTap: () => openStoreSettingsScreen(context),
+              leading: v?.locationVerified == true
+                  ? Icon(Icons.verified, color: Colors.blue.shade600)
+                  : const Icon(Icons.storefront_outlined, color: kTeal),
+              title: const Text('Store settings', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Timing, delivery, areas, logo / banner, location verify',
+                  style: TextStyle(color: Colors.black54, fontSize: 12.5)),
+              trailing: const Icon(Icons.chevron_right),
+            ),
+          ),
           const SectionTitle('Jald aa raha hai'),
           const Card(
             child: Column(
               children: [
-                _SoonTile(icon: Icons.storefront_outlined, title: 'Store settings'),
-                Divider(height: 1),
                 _SoonTile(icon: Icons.person_outline, title: 'Profile & help'),
               ],
             ),

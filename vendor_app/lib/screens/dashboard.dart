@@ -12,6 +12,7 @@ import '../widgets/skeleton.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/week_chart.dart';
 import 'rider_cash.dart';
+import 'store_settings.dart';
 
 /// Dashboard tab: salam + store naam + Open/Closed switch, alerts, aaj / hafta / mahina ki sale,
 /// orders, earnings, rating, products / stock, rider cash, 7 din ka chart, quick actions.
@@ -83,7 +84,7 @@ class DashboardScreen extends StatelessWidget {
 
     // ---- alerts
     for (final w in d.warnings) {
-      final VoidCallback? go = _warningTarget(st, w.code);
+      final VoidCallback? go = _warningTarget(context, st, w.code);
       out
         ..add(const SizedBox(height: 8))
         ..add(NoticeCard(
@@ -280,10 +281,16 @@ class DashboardScreen extends StatelessWidget {
   }
 
   /// Warning dabane par kahan jayein (None = sirf message).
-  VoidCallback? _warningTarget(AppState st, String code) {
+  VoidCallback? _warningTarget(BuildContext context, AppState st, String code) {
     switch (code) {
       case 'new_orders':
         return () => st.goTab(_tabOrders);
+      case 'location_unverified':
+        return () => openStoreLocationScreen(context);
+      case 'store_closed':
+      case 'outside_hours':
+      case 'store_busy':
+        return () => openStoreSettingsScreen(context);
       case 'out_of_stock':
       case 'low_stock':
       case 'pending_products':
