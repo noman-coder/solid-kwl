@@ -54,11 +54,10 @@ class VendorProduct {
   });
 
   factory VendorProduct.fromJson(Map<String, dynamic> m) {
-    final img = s(m['image']);
     return VendorProduct(
       id: toI(m['id']),
       name: s(m['name']),
-      image: img.isEmpty ? null : img,
+      image: pickImage(m), // list ke liye chhoti (thumb) tasveer
       category: s(m['category']),
       unit: s(m['unit']),
       barcode: s(m['barcode']),
@@ -73,7 +72,7 @@ class VendorProduct {
       isActive: m['is_active'] != false,
       visible: m['visible'] == true,
       canToggle: m['can_toggle'] == true,
-      needsPhoto: m.containsKey('needs_photo') ? m['needs_photo'] == true : img.isEmpty,
+      needsPhoto: m.containsKey('needs_photo') ? m['needs_photo'] == true : s(m['image']).isEmpty,
     );
   }
 

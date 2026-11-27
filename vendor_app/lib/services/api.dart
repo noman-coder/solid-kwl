@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -43,6 +44,9 @@ class ApiException implements Exception {
   /// Account ki approval baqi hai.
   bool get pending => code == 'pending';
 
+  /// Server ne bohat zyada requests par rok diya (429) - thori der ruk kar dobara.
+  bool get rateLimited => status == 429 && code == 'rate_limited';
+
   @override
   String toString() => message;
 }
@@ -79,6 +83,10 @@ class _ProgressMultipartRequest extends http.MultipartRequest {
 class Api {
   static const String server = kDefaultServer;
   static String? token;
+
+  /// Phase V17: internet / server se rabta nahi (aakhri request fail hui) - shell par 'offline' patti dikhti hai.
+  /// Kisi bhi request ke kamyab hote hi khud band.
+  static final ValueNotifier<bool> offline = ValueNotifier<bool>(false);
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
@@ -135,8 +143,11 @@ class Api {
               .post(_u(path), headers: headers, body: jsonEncode(body ?? <String, dynamic>{}))
               .timeout(const Duration(seconds: 20));
         }
-        return _decode(r);
+        final out = _decode(r);
+        if (offline.value) offline.value = false;
+        return out;
       } on ApiException {
+        if (offline.value) offline.value = false; // server ne jawab diya = net chal raha hai
         rethrow; // server ne jawab de diya (ghalat password, 404 ...) - dobara bhejne ka faida nahi
       } on TimeoutException {
         timedOut = true;
@@ -144,6 +155,7 @@ class Api {
         timedOut = false;
       }
     }
+    offline.value = true;
     throw ApiException(
       timedOut
           ? 'Server se jawab bohat dair se aa raha hai. Net / VPN check karke dobara koshish karein.'

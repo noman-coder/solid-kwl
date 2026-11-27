@@ -1,7 +1,7 @@
 name: kconn_vendor
 description: Khanewal Connect Vendor app (store owner ke liye)
 publish_to: 'none'
-version: 0.16.0+18
+version: 1.0.0+19
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -34,6 +34,8 @@ dependencies:
 dev_dependencies:
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.14.1
+  # Phase V17: splash screen (app kholte hi teal rang + icon, safed jhalak nahi)
+  flutter_native_splash: ^2.4.1
 
 flutter:
   uses-material-design: true
@@ -46,3 +48,11 @@ flutter_launcher_icons:
   image_path: "assets/icon/app_icon.png"
   adaptive_icon_background: "#0F766E"
   adaptive_icon_foreground: "assets/icon/app_icon_fg.png"
+
+flutter_native_splash:
+  color: "#0F766E"
+  image: assets/icon/app_icon_fg.png
+  android_12:
+    color: "#0F766E"
+    image: assets/icon/app_icon_fg.png
+    icon_background_color: "#0F766E"

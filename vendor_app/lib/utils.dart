@@ -1,10 +1,19 @@
 import 'package:url_launcher/url_launcher.dart';
 
 /// App ke andar dikhne wala naam (phone ke icon ka naam workflow ke APP_NAME se aata hai).
-const String kAppName = 'Vendor App';
+/// Naam sirf workflow ke `APP_NAME` se aata hai (--dart-define=APP_NAME=...); na mile to yeh placeholder.
+const String kAppName = String.fromEnvironment('APP_NAME', defaultValue: 'Vendor App');
 
 /// App ka version (pubspec.yaml ke version se milana).
-const String kAppVersion = '0.16.0 (18)';
+const String kAppVersion = '1.0.0 (19)';
+
+/// List ki chhoti tasveer: server `thumb` (Phase V17) de to wohi, warna poori `image`; dono na hon to null.
+String? pickImage(Map<String, dynamic> m) {
+  final t = s(m['thumb']);
+  if (t.isNotEmpty) return t;
+  final i = s(m['image']);
+  return i.isEmpty ? null : i;
+}
 
 /// Kisi bhi value ko safe text banao (null -> '').
 String s(dynamic v) => v == null ? '' : v.toString();

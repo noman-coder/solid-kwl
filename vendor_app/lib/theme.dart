@@ -55,6 +55,10 @@ ThemeData buildTheme() {
             fontWeight: states.contains(WidgetState.selected) ? FontWeight.w800 : FontWeight.w500,
           )),
     ),
+    // Phase V17: sab screens par ek jaisi halki transition (Android ki purani zoom ke bajaye)
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
+    }),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

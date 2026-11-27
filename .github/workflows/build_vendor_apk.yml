@@ -71,8 +71,12 @@ jobs:
       - name: App icon banao
         run: dart run flutter_launcher_icons
 
+      # Phase V17: splash screen (teal + icon) - flutter_native_splash
+      - name: Splash screen banao
+        run: dart run flutter_native_splash:create
+
       - name: Build release APK
-        run: flutter build apk --release --dart-define=API_BASE=${{ env.API_BASE }}
+        run: flutter build apk --release --dart-define=API_BASE=${{ env.API_BASE }} --dart-define=APP_NAME="${{ env.APP_NAME }}"
 
       - name: APK ka naam
         run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Vendor-App.apk

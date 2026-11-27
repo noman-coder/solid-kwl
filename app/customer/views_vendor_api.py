@@ -60,6 +60,7 @@ from django.contrib.auth.models import User
 from django.core import signing
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import validate_email
+from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, F, FloatField, OuterRef, Q, Subquery, Sum, Value, When
@@ -70,6 +71,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.gzip import gzip_page
 from django.views.decorators.http import require_http_methods
 
 from ..models import (Brand, Category, CompanyInfo, Coupon, CouponRedemption, DeliveryArea, DeliveryInfo, Inventory, OrderTracking,
@@ -84,6 +86,7 @@ from .views_coupons import MAX_VENDOR_COUPONS, _clean_vendor_coupon
 from .views_extras import MAX_REPLY_LEN, save_vendor_reply
 from .whatsapp_link import build_whatsapp_link
 from .geo import max_accuracy_m, parse_coords
+from .thumbs import thumb_url
 from .views_reviews import _reviewer_name, vendor_rating
 from .views_vendor_portal import (
     LOGIN_LOCK_SECONDS, LOGIN_MAX_ATTEMPTS, MASTER_MODELS, MAX_IMAGE_BYTES, MAX_PRICE, ORDER_TABS,
@@ -143,23 +146,54 @@ def _profile_from_request(request):
     return profile
 
 
+def _rate_hit(key, limit, window):
+    """Fixed-window counter (cache). True = hadd paar ho gayi. limit 0/None = band. Cache kharab ho to rokte nahi (API chalti rahe)."""
+    if not limit:
+        return False
+    try:
+        cache.add(key, 0, window)
+        try:
+            n = cache.incr(key)
+        except ValueError:
+            cache.set(key, 1, window)
+            n = 1
+        return n > limit
+    except Exception:
+        logger.warning('vendor api rate limit cache error', exc_info=True)
+        return False
+
+
+def _secure(resp):
+    """Har API jawab: cache na ho (token wala data), browser type guess na kare."""
+    resp['Cache-Control'] = 'no-store'
+    resp['X-Content-Type-Options'] = 'nosniff'
+    return resp
+
+
 def vendor_api(methods, approval_required=True):
-    """csrf_exempt + method check + token check (+ approval check).
+    """csrf_exempt + method check + token check (+ approval check) + rate limit + gzip (Phase V17).
 
     View ko (request, profile, ...) milta hai; vendor = profile.vendor.
     approval_required=False sirf login ke baad 'status dekhne' wali API (me, logout) ke liye.
+    Rate limit: ek vendor ke liye `VENDOR_API_RATE_LIMIT` requests / `VENDOR_API_RATE_WINDOW` second (429 + `Retry-After`).
     """
     def deco(view):
         @csrf_exempt
         @require_http_methods(methods)
+        @gzip_page
         @wraps(view)
         def wrapper(request, *args, **kwargs):
             profile = _profile_from_request(request)
             if profile is None:
-                return _err('Dobara login karein', 401, code='auth')
+                return _secure(_err('Dobara login karein', 401, code='auth'))
+            window = int(getattr(settings, 'VENDOR_API_RATE_WINDOW', 60) or 60)
+            if _rate_hit(f'vendor_api_rl:{profile.pk}', getattr(settings, 'VENDOR_API_RATE_LIMIT', 0), window):
+                resp = _err('Bohat zyada requests. Thori der ruk kar dobara try karein.', 429, code='rate_limited')
+                resp['Retry-After'] = str(window)
+                return _secure(resp)
             if approval_required and not profile.is_approved:
-                return _err(PENDING_MSG, 403, code='pending')
-            return view(request, profile, *args, **kwargs)
+                return _secure(_err(PENDING_MSG, 403, code='pending'))
+            return _secure(view(request, profile, *args, **kwargs))
         return wrapper
     return deco
 
@@ -197,8 +231,16 @@ def _vendor_json(profile):
 
 # ---------------------------------------------------------------- endpoints
 
+def _no_store(view):
+    @wraps(view)
+    def wrapper(*a, **kw):
+        return _secure(view(*a, **kw))
+    return wrapper
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
+@_no_store
 def api_login(request):
     d = _data(request)
     phone_raw = str(d.get('phone') or '').strip()[:20]
@@ -206,8 +248,12 @@ def api_login(request):
     if not phone_raw or not password or not isinstance(password, str):
         return _err('Phone aur password dono likhein')
 
+    ip = get_client_ip(request) or ''
+    if _rate_hit(f'vendor_login_ip:{ip}', getattr(settings, 'VENDOR_LOGIN_IP_LIMIT', 0),
+                 int(getattr(settings, 'VENDOR_LOGIN_IP_WINDOW', 300) or 300)):
+        return _err('Bohat zyada koshishen. Thori der baad dobara try karein.', 429, code='locked')
     phone = normalize_phone(phone_raw)
-    key = _login_key(phone, get_client_ip(request) or '')      # web login wala hi lockout
+    key = _login_key(phone, ip)      # web login wala hi lockout
     if cache.get(key, 0) >= LOGIN_MAX_ATTEMPTS:
         return _err('Bohat zyada koshishen. 10 minute baad dobara try karein.', 429, code='locked')
 
@@ -951,6 +997,7 @@ def _product_json(p):
         'id': p.pk,
         'name': p.name,
         'image': _media_url(p.image),
+        'thumb': thumb_url(p.image),
         'category': p.category.name if p.category_id else '',
         'unit': p.unit.name if p.unit_id else '',
         'barcode': p.barcode or '',
@@ -2480,7 +2527,7 @@ def _offer_json(o, store='', now_=None):
         days_left = max(0, (_offer_ends_on(o) - timezone.localtime(now_).date()).days + 1)
     return {
         'id': o.pk,
-        'product': {'id': p.pk, 'name': p.name, 'image': _media_url(p.image),
+        'product': {'id': p.pk, 'name': p.name, 'image': _media_url(p.image), 'thumb': thumb_url(p.image),
                     'category': p.category.name if p.category_id else ''},
         'discount_percent': _money(o.discount_percent),
         'base_price': _money(offers_engine.base_price(p)),
@@ -2592,7 +2639,7 @@ def api_offer_products(request, profile):
     out = []
     for p in rows:
         out.append({
-            'id': p.pk, 'name': p.name, 'image': _media_url(p.image),
+            'id': p.pk, 'name': p.name, 'image': _media_url(p.image), 'thumb': thumb_url(p.image),
             'category': p.category.name if p.category_id else '',
             'base_price': _money(offers_engine.base_price(p)),
             'regular_price': _money(offers_engine.prices(p, 0)[0]),

@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/login.dart';
@@ -8,12 +12,25 @@ import 'services/prefs.dart';
 import 'services/push.dart';
 import 'theme.dart';
 import 'utils.dart' show kAppName;
+import 'widgets/crash_view.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Prefs.load(); // alert pasand (banner / awaaz / vibration)
-  await Push.init(); // Firebase config na ho to khamoshi se band
-  runApp(const VendorApp());
+  // Phase V17 crash safety: koi bhi ghair-mutawaqqa galti app ko band na kare (log hoti hai, app chalti rehti hai)
+  runZonedGuarded<Future<void>>(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      debugPrint('FlutterError: ${details.exceptionAsString()}');
+    };
+    PlatformDispatcher.instance.onError = (error, stack) {
+      debugPrint('Uncaught: $error');
+      return true; // sambhal liya - app band nahi hogi
+    };
+    ErrorWidget.builder = (details) => kDebugMode ? ErrorWidget(details.exception) : const CrashView();
+    await Prefs.load(); // alert pasand (banner / awaaz / vibration)
+    await Push.init(); // Firebase config na ho to khamoshi se band
+    runApp(const VendorApp());
+  }, (error, stack) => debugPrint('Zone error: $error'));
 }
 
 class VendorApp extends StatefulWidget {

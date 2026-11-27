@@ -475,3 +475,11 @@ PWA_APP_ICONS_APPLE = [
 PWA_APP_DIR = 'ltr'
 PWA_APP_LANG = 'en-US'
 PWA_SERVICE_WORKER_PATH = os.path.join(BASE_DIR, 'static', 'serviceworker.js')
+
+# --- Phase V17: Vendor app API rate limit (ek vendor ke token par, ek window mein zyada se zyada itni requests) ---
+# 0 = band (tests mein khud band rehta hai). Zarurat ho to .env / environment se badlein.
+VENDOR_API_RATE_LIMIT = 0 if 'test' in sys.argv else int(os.environ.get('VENDOR_API_RATE_LIMIT', '240'))
+VENDOR_API_RATE_WINDOW = int(os.environ.get('VENDOR_API_RATE_WINDOW', '60'))      # seconds
+# Login par IP ke hisab se hadd (phone + IP wale 5-galat-koshish lockout ke ilawa; phone badal badal kar ghalat koshish rokne ke liye)
+VENDOR_LOGIN_IP_LIMIT = 0 if 'test' in sys.argv else int(os.environ.get('VENDOR_LOGIN_IP_LIMIT', '60'))
+VENDOR_LOGIN_IP_WINDOW = int(os.environ.get('VENDOR_LOGIN_IP_WINDOW', '300'))     # seconds

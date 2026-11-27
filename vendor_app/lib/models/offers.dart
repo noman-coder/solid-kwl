@@ -26,11 +26,10 @@ class OfferProduct {
 
   factory OfferProduct.fromJson(dynamic j) {
     final m = asMap(j);
-    final img = s(m['image']);
     return OfferProduct(
       id: toI(m['id']),
       name: s(m['name']),
-      image: img.isEmpty ? null : img,
+      image: pickImage(m),
       category: s(m['category']),
     );
   }
@@ -191,11 +190,10 @@ class OfferPick {
 
   factory OfferPick.fromJson(dynamic j) {
     final m = asMap(j);
-    final img = s(m['image']);
     return OfferPick(
       id: toI(m['id']),
       name: s(m['name']),
-      image: img.isEmpty ? null : img,
+      image: pickImage(m),
       category: s(m['category']),
       basePrice: toD(m['base_price']),
       regularPrice: toD(m['regular_price']),

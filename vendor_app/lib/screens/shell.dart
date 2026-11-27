@@ -8,8 +8,10 @@ import '../services/api.dart';
 import '../services/app_state.dart';
 import '../services/prefs.dart';
 import '../services/push.dart';
+import '../utils.dart' show kAppName;
 import '../widgets/empty_state.dart';
 import '../widgets/in_app_banner.dart';
+import '../widgets/offline_banner.dart';
 import '../widgets/skeleton.dart';
 import 'dashboard.dart';
 import 'more.dart';
@@ -195,14 +197,14 @@ class _VendorShellState extends State<VendorShell> with WidgetsBindingObserver {
           // Pehli dafa load ho raha hai
           if (_state.vendor == null && _state.loading) {
             return Scaffold(
-              appBar: AppBar(title: const Text('Vendor App')),
+              appBar: AppBar(title: const Text(kAppName)),
               body: const Padding(padding: EdgeInsets.all(16), child: SkeletonList(count: 4)),
             );
           }
           // Load nahi hua (internet / server)
           if (_state.vendor == null) {
             return Scaffold(
-              appBar: AppBar(title: const Text('Vendor App')),
+              appBar: AppBar(title: const Text(kAppName)),
               body: EmptyState(
                 icon: Icons.wifi_off_rounded,
                 title: 'Load nahi ho saka',
@@ -228,19 +230,29 @@ class _VendorShellState extends State<VendorShell> with WidgetsBindingObserver {
           final tab = _state.tab;
           return Scaffold(
             appBar: AppBar(title: Text(tab == 0 ? _state.vendor!.name : _titles[tab])),
-            body: IndexedStack(
-              index: tab,
+            body: Column(
               children: [
-                const DashboardScreen(),
-                const OrdersScreen(),
-                const ProductsScreen(),
-                const SalesScreen(),
-                MoreScreen(onLogout: widget.onLogout),
+                OfflineBanner(onRetry: _state.refreshAll),
+                Expanded(
+                  child: IndexedStack(
+                    index: tab,
+                    children: [
+                      const DashboardScreen(),
+                      const OrdersScreen(),
+                      const ProductsScreen(),
+                      const SalesScreen(),
+                      MoreScreen(onLogout: widget.onLogout),
+                    ],
+                  ),
+                ),
               ],
             ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: tab,
-              onDestinationSelected: _state.goTab,
+              onDestinationSelected: (i) {
+                if (i != tab) HapticFeedback.selectionClick(); // Phase V17: tab badalne par halki haptic
+                _state.goTab(i);
+              },
               destinations: [
                 const NavigationDestination(
                     icon: Icon(Icons.dashboard_outlined),
