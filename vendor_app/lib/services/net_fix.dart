@@ -21,7 +21,14 @@ class DnsFallbackOverrides extends HttpOverrides {
       final host = proxyHost ?? url.host;
       final port = proxyPort ?? url.port;
       final addrs = await _resolve(host);
-      return Socket.startConnect(addrs.first, port);
+      final task = await Socket.startConnect(addrs.first, port);
+      // Proxy ke baghair https: TLS yahan hum chalate hain (domain ke naam par - SNI aur certificate check theek rehta hai).
+      // Pehle ye missing tha, is liye HTTPS port par plain HTTP chali jati thi (Cloudflare 400).
+      if (url.scheme != 'https' || proxyHost != null) return task;
+      final Future<Socket> secured = task.socket.then<Socket>(
+        (Socket raw) => SecureSocket.secure(raw, host: url.host, context: context),
+      );
+      return ConnectionTask<Socket>.fromSocket(secured, task.cancel);
     };
     return client;
   }
