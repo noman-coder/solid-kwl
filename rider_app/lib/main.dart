@@ -12,6 +12,7 @@ import 'theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = DnsFallbackOverrides(); // ISP DNS kharab ho to DoH se chale
+  await DnsFallbackOverrides.start(); // local HTTPS tunnel (DoH ke liye)
   await Push.init(); // Firebase (push notification). Config na ho to khamoshi se band.
   runApp(const RiderApp());
 }

@@ -21,6 +21,7 @@ Future<void> main() async {
   runZonedGuarded<Future<void>>(() async {
     WidgetsFlutterBinding.ensureInitialized();
     HttpOverrides.global = DnsFallbackOverrides(); // ISP DNS kharab ho to DoH se chale
+    await DnsFallbackOverrides.start(); // local HTTPS tunnel (DoH ke liye)
     FlutterError.onError = (details) {
       FlutterError.presentError(details);
       debugPrint('FlutterError: ${details.exceptionAsString()}');
