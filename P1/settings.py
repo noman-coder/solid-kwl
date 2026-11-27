@@ -93,6 +93,11 @@ def _env_first(*names):
     return ''
 
 # Brevo API (GitHub Secrets se): key + sender name + sender email
+# Gemini: nayi Category ko master category dene ke liye (sirf server par; app mein kabhi nahi)
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash').strip()
+CATEGORY_AI_AUTO = os.environ.get('CATEGORY_AI_AUTO', '1').strip().lower() in ('1', 'true', 'yes')
+
 BREVO_API_KEY = _env_first('BREVO_API_KEY', 'BREVO_KEY', 'SENDINBLUE_API_KEY')
 BREVO_SENDER_NAME = _env_first('BREVO_SENDER_NAME', 'SENDER_NAME', 'EMAIL_SENDER_NAME') or 'UQN88 Store'
 BREVO_SENDER_EMAIL = _env_first('BREVO_SENDER_EMAIL', 'SENDER_EMAIL', 'EMAIL_SENDER_EMAIL')

@@ -26,6 +26,8 @@ from django.urls import path
 from . import views
 from .customer import views_delivery
 from .customer import views_order_tracking
+from .customer import views_rider_api
+from .customer import views_vendor_api
 from app.views_frontend.system.settings_center import settings_center
 from app.views_frontend.pos_sales import pos as pos_views
 from app.views_frontend.pos_sales import shift as shift_views
@@ -1151,6 +1153,8 @@ urlpatterns = [
      path('shop/vendor/coupons/', views_coupons.vendor_coupons, name='vendor_coupons'),
      path('shop/vendor/coupons/<int:pk>/toggle/', views_coupons.vendor_coupon_toggle, name='vendor_coupon_toggle'),
      path('shop/vendor/coupons/<int:pk>/delete/', views_coupons.vendor_coupon_delete, name='vendor_coupon_delete'),
+     path('shop/vendor/rider-cash/', views_vendor_portal.vendor_rider_cash, name='vendor_rider_cash'),
+     path('shop/vendor/rider-cash/<int:pk>/<str:action>/', views_vendor_portal.vendor_rider_cash_action, name='vendor_rider_cash_action'),
      path('shop/vendor/reviews/', views_extras.vendor_reviews, name='vendor_reviews'),
      path('shop/vendor/reviews/<int:pk>/reply/', views_extras.vendor_review_reply, name='vendor_review_reply'),
      # ---- Rider portal (Talabat jaisa rider) ----
@@ -1162,6 +1166,79 @@ urlpatterns = [
      path('shop/rider/online/', views_rider_portal.rider_toggle_online, name='rider_toggle_online'),
      path('shop/rider/api/poll/', views_rider_portal.rider_poll, name='rider_poll'),
      path('shop/rider/api/location/', views_rider_portal.rider_update_location, name='rider_update_location'),
+     # ---- Rider Android app (token API) ----
+     path('api/rider/login/', views_rider_api.api_login, name='rider_api_login'),
+     path('api/rider/logout/', views_rider_api.api_logout, name='rider_api_logout'),
+     path('api/rider/push-token/', views_rider_api.api_push_token, name='rider_api_push_token'),
+     path('api/rider/me/', views_rider_api.api_me, name='rider_api_me'),
+     path('api/rider/online/', views_rider_api.api_online, name='rider_api_online'),
+     path('api/rider/orders/', views_rider_api.api_orders, name='rider_api_orders'),
+     path('api/rider/orders/<int:pk>/accept/', views_rider_api.api_accept, name='rider_api_accept'),
+     path('api/rider/orders/<int:pk>/', views_rider_api.api_order_detail, name='rider_api_order_detail'),
+     path('api/rider/orders/<int:pk>/<str:action>/', views_rider_api.api_order_action, name='rider_api_action'),
+     path('api/rider/location/', views_rider_api.api_location, name='rider_api_location'),
+     path('api/rider/dashboard/', views_rider_api.api_dashboard, name='rider_api_dashboard'),
+     path('api/rider/history/', views_rider_api.api_history, name='rider_api_history'),
+     path('api/rider/profile/', views_rider_api.api_profile, name='rider_api_profile'),
+     path('api/rider/password/', views_rider_api.api_password, name='rider_api_password'),
+     path('api/rider/wallet/', views_rider_api.api_wallet, name='rider_api_wallet'),
+     path('api/rider/cash/handover/', views_rider_api.api_cash_handover, name='rider_api_cash_handover'),
+     path('api/rider/cash/handovers/', views_rider_api.api_handovers, name='rider_api_handovers'),
+     # ---- Vendor Android app API (Phase V1) ----
+     path('api/vendor/login/', views_vendor_api.api_login, name='vendor_api_login'),
+     path('api/vendor/logout/', views_vendor_api.api_logout, name='vendor_api_logout'),
+     path('api/vendor/me/', views_vendor_api.api_me, name='vendor_api_me'),
+     path('api/vendor/push-token/', views_vendor_api.api_push_token, name='vendor_api_push_token'),
+     path('api/vendor/dashboard/', views_vendor_api.api_dashboard, name='vendor_api_dashboard'),
+     path('api/vendor/store/open/', views_vendor_api.api_store_open, name='vendor_api_store_open'),
+     path('api/vendor/orders/', views_vendor_api.api_orders, name='vendor_api_orders'),
+     path('api/vendor/orders/poll/', views_vendor_api.api_orders_poll, name='vendor_api_orders_poll'),
+     # ---- Phase V6: order detail / live track / rider dena (generic <action> route se PEHLE rakhna zaroori hai) ----
+     path('api/vendor/orders/<int:pk>/', views_vendor_api.api_order_detail, name='vendor_api_order_detail'),
+     path('api/vendor/orders/<int:pk>/track/', views_vendor_api.api_order_track, name='vendor_api_order_track'),
+     path('api/vendor/orders/<int:pk>/assign-rider/', views_vendor_api.api_assign_rider, name='vendor_api_assign_rider'),
+     path('api/vendor/orders/<int:pk>/<str:action>/', views_vendor_api.api_order_action, name='vendor_api_order_action'),
+     # ---- Phase V8: products tab (quick-update/ ko <int:pk> wale route se pehle rakha hai) ----
+     path('api/vendor/products/', views_vendor_api.api_products, name='vendor_api_products'),
+     path('api/vendor/products/quick-update/', views_vendor_api.api_products_quick_update, name='vendor_api_products_quick_update'),
+     path('api/vendor/products/<int:pk>/toggle/', views_vendor_api.api_product_toggle, name='vendor_api_product_toggle'),
+     # ---- Phase V9-A: product add/edit (form-data/ pehle; <int:pk>/ edit toggle/ se alag hai) ----
+     path('api/vendor/products/form-data/', views_vendor_api.api_product_form_data, name='vendor_api_product_form_data'),
+     path('api/vendor/products/<int:pk>/', views_vendor_api.api_product_edit, name='vendor_api_product_edit'),
+     path('api/vendor/masters/<str:kind>/', views_vendor_api.api_create_master, name='vendor_api_create_master'),
+     # ---- Phase V10: stock & inventory tools ----
+     path('api/vendor/stock/', views_vendor_api.api_stock, name='vendor_api_stock'),
+     path('api/vendor/stock/adjust/', views_vendor_api.api_stock_adjust, name='vendor_api_stock_adjust'),
+     path('api/vendor/stock/threshold/', views_vendor_api.api_stock_threshold, name='vendor_api_stock_threshold'),
+     path('api/vendor/stock/history/', views_vendor_api.api_stock_history, name='vendor_api_stock_history'),
+     # Phase V11: sales, cash & profit
+     path('api/vendor/sales/', views_vendor_api.api_sales, name='vendor_api_sales'),
+     path('api/vendor/sales/statement/', views_vendor_api.api_sales_statement, name='vendor_api_sales_statement'),
+     path('api/vendor/sales/orders/', views_vendor_api.api_sales_orders, name='vendor_api_sales_orders'),
+     path('api/vendor/sales/export/', views_vendor_api.api_sales_export, name='vendor_api_sales_export'),
+     # Phase V12: rider cash handover (confirm / reject)
+     path('api/vendor/rider-cash/', views_vendor_api.api_rider_cash, name='vendor_api_rider_cash'),
+     path('api/vendor/rider-cash/<int:pk>/<str:action>/', views_vendor_api.api_rider_cash_action, name='vendor_api_rider_cash_action'),
+     # Phase V13: coupons (list / create / edit / toggle / delete)
+     path('api/vendor/coupons/', views_vendor_api.api_coupons, name='vendor_api_coupons'),
+     path('api/vendor/coupons/<int:pk>/', views_vendor_api.api_coupon_edit, name='vendor_api_coupon_edit'),
+     path('api/vendor/coupons/<int:pk>/toggle/', views_vendor_api.api_coupon_toggle, name='vendor_api_coupon_toggle'),
+     path('api/vendor/coupons/<int:pk>/delete/', views_vendor_api.api_coupon_delete, name='vendor_api_coupon_delete'),
+     # Phase V13-B: offers
+     path('api/vendor/offers/', views_vendor_api.api_offers, name='vendor_api_offers'),
+     path('api/vendor/offers/products/', views_vendor_api.api_offer_products, name='vendor_api_offer_products'),
+     path('api/vendor/offers/<int:pk>/', views_vendor_api.api_offer_edit, name='vendor_api_offer_edit'),
+     path('api/vendor/offers/<int:pk>/toggle/', views_vendor_api.api_offer_toggle, name='vendor_api_offer_toggle'),
+     path('api/vendor/offers/<int:pk>/delete/', views_vendor_api.api_offer_delete, name='vendor_api_offer_delete'),
+     # Phase V14: reviews (list / jawab)
+     path('api/vendor/store/', views_vendor_api.api_store, name='vendor_api_store'),
+     path('api/vendor/store/location/', views_vendor_api.api_store_location, name='vendor_api_store_location'),
+
+     path('api/vendor/reviews/', views_vendor_api.api_reviews, name='vendor_api_reviews'),
+     path('api/vendor/reviews/<int:pk>/reply/', views_vendor_api.api_review_reply, name='vendor_api_review_reply'),
+     path('api/vendor/profile/', views_vendor_api.api_profile, name='vendor_api_profile'),
+     path('api/vendor/password/', views_vendor_api.api_password, name='vendor_api_password'),
+     path('api/vendor/account/delete/', views_vendor_api.api_account_delete, name='vendor_api_account_delete'),
      path('shop/rider/accept/<int:pk>/', views_rider_portal.rider_accept_order, name='rider_accept_order'),
      path('shop/rider/manage/<int:pk>/', views_rider_portal.rider_detail, name='rider_detail'),
      path('shop/rider/order/<int:pk>/<str:action>/', views_rider_portal.rider_order_action, name='rider_order_action'),

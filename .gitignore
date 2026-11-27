@@ -1,1 +1,21 @@
 *.zip
+
+# Secrets - GitHub par kabhi push na karein
+license_private.key
+*.jks
+*.keystore
+key.properties
+
+# Flutter / Android build (flutter create workflow mein banta hai)
+rider_app/android/
+rider_app/build/
+rider_app/.dart_tool/
+rider_app/.flutter-plugins*
+rider_app/.packages
+
+# Vendor app: Flutter / Android build (flutter create workflow mein banta hai)
+vendor_app/android/
+vendor_app/build/
+vendor_app/.dart_tool/
+vendor_app/.flutter-plugins*
+vendor_app/.packages

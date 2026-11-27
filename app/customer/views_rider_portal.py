@@ -15,7 +15,7 @@ from django.contrib.auth import authenticate, logout
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Sum
+from django.db.models import Count, F, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -28,8 +28,8 @@ from django.views.decorators.http import require_POST
 
 from ..decorators import vendor_login_required
 from ..models import (
-    CompanyInfo, DeliveryInfo, OrderTracking, RiderProfile, RiderSettlement, SaleOrder, VendorProfile,
-    RiderLiveLocation, RiderLocationLog,
+    CompanyInfo, DeliveryInfo, OrderTracking, RiderCashHandover, RiderProfile, RiderSettlement, SaleOrder,
+    VendorProfile, RiderLiveLocation, RiderLocationLog,
 )
 from . import store_orders
 from .views_reviews import rider_rating
@@ -396,7 +396,8 @@ def rider_order_action(request, pk, action):
 # LIVE LOCATION (rider ke phone ka GPS -> customer ka map)
 # ============================================
 
-TRACK_STATUSES = ['picked_up', 'in_transit']      # 'assigned' bhi chahiye to yahan add karein
+# Phase 3: accept (assigned) ke baad se hi location save hoti hai (store tak jaate waqt bhi)
+TRACK_STATUSES = ['assigned', 'picked_up', 'in_transit']
 
 
 def _fnum(v):
@@ -407,30 +408,36 @@ def _fnum(v):
     return f if f == f and f not in (float('inf'), float('-inf')) else None
 
 
-@rider_login_required
-@require_POST
-def rider_update_location(request):
-    """Rider ka browser har ~10s yahan GPS bhejta hai. Sirf active delivery par save hota hai."""
-    rider = request.user.rider_profile
-    lat, lng = _fnum(request.POST.get('lat')), _fnum(request.POST.get('lng'))
+def save_rider_location(rider, post):
+    """Web aur Android app dono yahan se location save karte hain. post = dict-jaisa (lat,lng,acc,spd,hdg).
+    Return: (http_status, json_dict)"""
+    lat, lng = _fnum(post.get('lat')), _fnum(post.get('lng'))
     if lat is None or lng is None or not (-90 <= lat <= 90 and -180 <= lng <= 180):
-        return JsonResponse({'ok': False}, status=400)
+        return 400, {'ok': False}
     di = (DeliveryInfo.objects.filter(rider=rider, status__in=TRACK_STATUSES)
-          .order_by('-picked_up_at').first())
+          .order_by(F('picked_up_at').desc(nulls_last=True), '-assigned_at').first())
     if not di:                                    # active delivery nahi -> kuch save nahi
-        return JsonResponse({'ok': True, 'tracking': False})
-    acc = _fnum(request.POST.get('acc'))
+        return 200, {'ok': True, 'tracking': False}
+    acc = _fnum(post.get('acc'))
     if acc is not None and acc > 500:             # bohot kharab GPS: ignore
-        return JsonResponse({'ok': True, 'tracking': True, 'skipped': 'low_accuracy'})
+        return 200, {'ok': True, 'tracking': True, 'skipped': 'low_accuracy'}
     RiderLiveLocation.objects.update_or_create(rider=rider, defaults={
         'latitude': lat, 'longitude': lng, 'accuracy_m': acc,
-        'speed_mps': _fnum(request.POST.get('spd')), 'heading': _fnum(request.POST.get('hdg'))})
+        'speed_mps': _fnum(post.get('spd')), 'heading': _fnum(post.get('hdg'))})
     key = f'rloglast:{rider.pk}'
     if not cache.get(key):                        # history har 30 second mein 1 baar
         RiderLocationLog.objects.create(delivery=di, latitude=lat, longitude=lng, accuracy_m=acc)
         cache.set(key, 1, 30)
     _touch(rider)
-    return JsonResponse({'ok': True, 'tracking': True})
+    return 200, {'ok': True, 'tracking': True}
+
+
+@rider_login_required
+@require_POST
+def rider_update_location(request):
+    """Rider ka browser har ~10s yahan GPS bhejta hai. Sirf active delivery par save hota hai."""
+    code, data = save_rider_location(request.user.rider_profile, request.POST)
+    return JsonResponse(data, status=code)
 
 
 # ============================================
@@ -567,6 +574,23 @@ def rider_detail(request, pk):
                 rider.per_delivery_fee = fee
                 rider.save(update_fields=['per_delivery_fee'])
                 messages.success(request, f'✅ Fee Rs. {fee:,.0f} per delivery kar di (naye orders par lagu).')
+        elif action in ('handover_confirm', 'handover_reject'):
+            # Phase 2: rider ka cash handover (receiver = Admin) confirm / reject
+            from .rider_cash_service import HandoverError, confirm_handover, reject_handover
+            try:
+                hid = int(request.POST.get('handover_id') or 0)
+                # sirf is rider ka aur sirf Admin wala handover
+                h = RiderCashHandover.objects.filter(pk=hid, rider=rider).first()
+                if h is None:
+                    raise HandoverError('Handover nahi mila.')
+                if action == 'handover_confirm':
+                    h = confirm_handover(h.pk, request.user)
+                    messages.success(request, f'✅ Rs. {h.amount:,.0f} ka cash confirm ho gaya ({rider.name}).')
+                else:
+                    h = reject_handover(h.pk, request.user, request.POST.get('reason'))
+                    messages.success(request, f'Handover reject kar diya. Raqam {rider.name} ke paas hi hai.')
+            except (HandoverError, ValueError) as exc:
+                messages.error(request, f'❌ {exc}')
         elif action in ('cash_in', 'payout'):
             amount = _money(request.POST.get('amount'))
             bal = rider_balances(rider)
@@ -589,4 +613,9 @@ def rider_detail(request, pk):
         'rating': rider_rating(rider),
         'reviews': rider.reviews.filter(rider_rating__isnull=False).select_related('sale_order')[:10],
         'settlements': rider.settlements.select_related('created_by')[:30],
+        # Phase 2: handovers
+        'pending_admin_handovers': rider.handovers.filter(receiver='admin', status='pending'),
+        'pending_vendor_handovers': rider.handovers.filter(receiver='vendor', status='pending')
+                                         .select_related('vendor'),
+        'recent_handovers': rider.handovers.select_related('vendor', 'decided_by')[:20],
     })

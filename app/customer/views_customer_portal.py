@@ -52,6 +52,7 @@ from ..models import (
     AdminPresence, DeliverySettings, DeliveryArea
 )
 
+from . import offers as vendor_offers
 from .payment_options import get_payment_options, clean_payment_method
 from .checkout_cart import get_checkout_cart
 from ..decorators import customer_login_required
@@ -632,6 +633,7 @@ def enrich_recently_viewed_with_prices(recently_viewed, cart=None):
             except (ValueError, TypeError):
                 pass
     
+    vendor_offers.overlay(recently_viewed)
     for product in recently_viewed:
         if product.id in rv_price_map:
             base_price = rv_price_map[product.id]
@@ -679,8 +681,14 @@ def get_product_final_price(product):
     else:
         base_price = product.price
     
-    if product.discount_percentage and product.discount_percentage > 0:
-        discount_amount = base_price * (product.discount_percentage / Decimal('100'))
+    discount = product.discount_percentage
+    if not hasattr(product, 'offer_percent'):        # offer (V13-B) abhi memory mein nahi laga -> yahin laga lo
+        try:
+            discount = vendor_offers.effective_discount(product)
+        except Exception:
+            discount = product.discount_percentage
+    if discount and discount > 0:
+        discount_amount = base_price * (discount / Decimal('100'))
         return base_price - discount_amount
     return base_price
 
@@ -725,6 +733,40 @@ def _home_categories():
     out = [{'id': c.id, 'name': c.name, 'icon': _category_emoji(c.name), 'tone': (c.id % 8) + 1} for c in rows]
     cache.set('shop_home_categories', out, 120)
     return out
+
+
+def _home_masters():
+    """Master (bari) categories jin ke andar kam az kam 1 active product ho."""
+    cached = cache.get('shop_home_masters')
+    if cached is not None:
+        return cached
+    from ..models import MasterCategory
+    rows = (MasterCategory.objects.filter(is_active=True)
+            .annotate(n=Count('categories__products', filter=Q(categories__products__is_active=True)))
+            .filter(n__gt=0).order_by('sort_order', 'name'))
+    out = [{'id': m.id, 'name': m.name, 'icon': m.icon or '🛍️', 'tone': (m.id % 8) + 1, 'n': m.n} for m in rows]
+    cache.set('shop_home_masters', out, 120)
+    return out
+
+
+def _home_tiles(master_id):
+    """Shop home ke tiles: (tiles, selected_master_name).
+    Default: master categories. ?master=<id> par: us ki sub-categories (har tile ?category= par jata hai).
+    Agar master abhi bane hi nahi (migrate/classify baaqi) to purani flat categories - page kabhi khali nahi."""
+    from ..models import MasterCategory
+    if master_id:
+        m = MasterCategory.objects.filter(pk=master_id, is_active=True).first()
+        if m:
+            subs = (Category.objects.filter(master=m, products__is_active=True)
+                    .annotate(n=Count('products', filter=Q(products__is_active=True)))
+                    .order_by('-n', 'name').only('id', 'name'))
+            tiles = [{'id': c.id, 'name': c.name, 'icon': _category_emoji(c.name), 'tone': (c.id % 8) + 1,
+                      'href': f'?category={c.id}#products-section'} for c in subs]
+            return tiles, m.name
+    masters = _home_masters()
+    if masters:
+        return [dict(m, href=f"?master={m['id']}#products-section") for m in masters], ''
+    return [dict(c, href=f"?category={c['id']}#products-section") for c in _home_categories()], ''
 
 
 def shop_home(request):
@@ -787,6 +829,14 @@ def shop_home(request):
         except (ValueError, TypeError):
             category_id = ''
     
+    master_id = ''
+    if not category_id:
+        try:
+            master_id = int(request.GET.get('master', ''))
+            products = products.filter(category__master_id=master_id)      # master khuli: us ki sab sub-categories ke products
+        except (ValueError, TypeError):
+            master_id = ''
+
     brand_id = request.GET.get('brand', '')
     if brand_id:
         try:
@@ -844,6 +894,7 @@ def shop_home(request):
         except (ValueError, TypeError):
             pass
     
+    vendor_offers.overlay(list(page_obj))
     for product in page_obj:
         product.available_stock = product.total_stock or 0
         
@@ -941,8 +992,11 @@ def shop_home(request):
         logger.error(f"Shop home banners/stores error: {e}")
         banners, featured_stores = [], []
 
+    selected_master_name = ''
     try:
-        home_categories = _home_categories()
+        home_categories, selected_master_name = _home_tiles(master_id)
+        if master_id and not selected_master_name:
+            master_id = ''
     except Exception as e:
         logger.error(f"Shop home categories error: {e}")
         home_categories = []
@@ -962,6 +1016,8 @@ def shop_home(request):
         'original_search': original_search,
         'typo_corrected': typo_corrected,
         'selected_category': category_id,
+        'selected_master': master_id,
+        'selected_master_name': selected_master_name,
         'selected_brand': brand_id,
         'selected_sort': sort,
         'selected_category_name': selected_category_name,
@@ -988,6 +1044,7 @@ def _price_products(items):
     items = list(items)
     if not items:
         return items
+    vendor_offers.overlay(items)
     ids = [p.id for p in items]
     best = {bp['product_id']: bp['best_price'] for bp in StockBatch.objects.filter(
         product_id__in=ids, remaining_qty__gt=0, selling_price__gt=0
@@ -1035,6 +1092,7 @@ def product_detail(request, pk):
         total=Sum('stock')
     )['total'] or 0
     product.available_stock = total_stock
+    vendor_offers.overlay([product])
     
     batch = StockBatch.objects.filter(
         product=product,
@@ -1066,6 +1124,7 @@ def product_detail(request, pk):
     ).exclude(id=product.id).select_related('category', 'brand')[:8]
     
     if related:
+        vendor_offers.overlay(related)
         related_ids = [p.id for p in related]
         
         related_batch_prices = StockBatch.objects.filter(
@@ -2168,6 +2227,12 @@ def cancel_order_customer(request, order_id):
                                             cancel_msg, kind='warning')
         except Exception:
             logger.exception('Cancel notify error')
+        try:
+            if order.vendor_id:
+                from .. import vendor_push        # vendor ke phone par push (customer ke cancel par)
+                vendor_push.notify_order_cancelled(order.pk)
+        except Exception:
+            logger.exception('Vendor push (cancel) hook error')
         
         return JsonResponse({
             'success': True,

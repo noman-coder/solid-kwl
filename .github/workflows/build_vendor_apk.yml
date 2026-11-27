@@ -1,0 +1,83 @@
+name: Build Vendor APK
+
+# Manual chalayein: GitHub > Actions > "Build Vendor APK" > Run workflow
+# Server fixed hai: https://khanewalconnect.store (app mein kahin dikhta nahi).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'vendor_app/**'
+      - '.github/workflows/build_vendor_apk.yml'
+
+env:
+  # App ka naam / package / server - sirf yahin se badlein (placeholder naam).
+  APP_NAME: 'Vendor App'
+  APP_ID: 'com.khanewal.vendor.app'
+  API_BASE: 'https://khanewalconnect.store'
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vendor_app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Android project banao (sirf android folder)
+        run: flutter create --platforms=android --org com.khanewal --project-name kconn_vendor .
+
+      - name: Package name (applicationId) lagao
+        run: python3 tool/patch_gradle.py android/app "$APP_ID"
+
+      - name: Permissions + app naam lagao
+        run: python3 tool/patch_manifest.py android/app/src/main/AndroidManifest.xml "$APP_NAME"
+
+      # Push notification. GitHub Secret GOOGLE_SERVICES_JSON_VENDOR = vendor app ki (alag Android app,
+      # package com.khanewal.vendor.app) Firebase google-services.json ka poora text.
+      # Rider wali google-services.json yahan nahi chalegi (package alag hai).
+      # Secret na ho to APK phir bhi ban jati hai, bas push band rehta hai.
+      - name: Push notification setup (Firebase)
+        env:
+          GOOGLE_SERVICES_JSON_VENDOR: ${{ secrets.GOOGLE_SERVICES_JSON_VENDOR }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_VENDOR" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_VENDOR" > android/app/google-services.json
+            echo "google-services.json likh di."
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON_VENDOR secret nahi mila - APK ban jayegi lekin push notification band rahegi."
+          fi
+          python3 tool/patch_push.py android "$APP_ID"
+
+      # Phase V7: "Naye orders" notification ki alag awaaz (res/raw/new_order.wav) + notification ka rang
+      - name: Notification awaaz + rang lagao
+        run: python3 tool/patch_notification.py android
+
+      - name: Purana auto-generated test hatao
+        run: rm -rf test
+
+      - run: flutter pub get
+
+      - name: App icon banao
+        run: dart run flutter_launcher_icons
+
+      - name: Build release APK
+        run: flutter build apk --release --dart-define=API_BASE=${{ env.API_BASE }}
+
+      - name: APK ka naam
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Vendor-App.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vendor-apk
+          path: vendor_app/build/app/outputs/flutter-apk/Vendor-App.apk

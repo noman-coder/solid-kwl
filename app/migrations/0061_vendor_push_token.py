@@ -1,0 +1,32 @@
+"""Vendor push notification tokens (FCM) - Vendor app Phase V2.
+
+SAFE: sirf CreateModel (1 nayi table). Koi table drop/rename nahi, koi RemoveField nahi,
+koi RunSQL/RunPython nahi. Purani tables ko chhua nahi gaya.
+"""
+import django.db.models.deletion
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('app', '0060_master_category'),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='VendorPushToken',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('token', models.CharField(max_length=255, unique=True)),
+                ('device', models.CharField(blank=True, default='', help_text='Phone ka naam/model (optional, sirf pehchan ke liye)', max_length=100)),
+                ('platform', models.CharField(default='android', max_length=20)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('profile', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='push_tokens', to='app.vendorprofile')),
+            ],
+            options={
+                'ordering': ['-updated_at'],
+            },
+        ),
+    ]

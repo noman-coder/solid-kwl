@@ -16,6 +16,41 @@
     <div class="col-6 col-lg-3"><div class="card shadow-sm border-primary"><div class="card-body py-2"><div class="text-muted small">Rider ko dene wali kamai</div><div class="h4 mb-0 text-primary">Rs. {{ b.due|floatformat:0 }}</div></div></div></div>
   </div>
 
+  {% if pending_admin_handovers %}
+  <div class="card shadow-sm border-warning mt-3">
+    <div class="card-header fw-bold bg-warning-subtle">⏳ Pending cash handovers (Admin ko diye)</div>
+    <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+      <thead class="table-light"><tr><th>Waqt</th><th class="text-end">Raqam</th><th>Note</th><th style="min-width:260px">Faisla</th></tr></thead>
+      {% for h in pending_admin_handovers %}
+      <tr>
+        <td>{{ h.created_at|date:"d M, h:i A" }}</td>
+        <td class="text-end fw-bold">Rs. {{ h.amount|floatformat:0 }}</td>
+        <td>{{ h.note|default:"—" }}</td>
+        <td>
+          <form method="post" class="d-inline">{% csrf_token %}
+            <input type="hidden" name="action" value="handover_confirm">
+            <input type="hidden" name="handover_id" value="{{ h.pk }}">
+            <button class="btn btn-sm btn-success" onclick="return confirm('Rs. {{ h.amount|floatformat:0 }} mil gaye? Confirm karein.')">✅ Confirm</button>
+          </form>
+          <form method="post" class="d-inline-flex gap-1 ms-1">{% csrf_token %}
+            <input type="hidden" name="action" value="handover_reject">
+            <input type="hidden" name="handover_id" value="{{ h.pk }}">
+            <input class="form-control form-control-sm" name="reason" placeholder="Reject ki wajah" maxlength="200" required style="width:150px">
+            <button class="btn btn-sm btn-outline-danger">Reject</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table></div>
+  </div>
+  {% endif %}
+  {% if pending_vendor_handovers %}
+  <div class="alert alert-info mt-3 mb-0 small">
+    ℹ️ Vendor ko diye gaye pending handovers (vendor khud confirm karega):
+    {% for h in pending_vendor_handovers %}<b>{{ h.vendor.name|default:"Vendor" }}</b> Rs. {{ h.amount|floatformat:0 }}{% if not forloop.last %}, {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+
   <div class="row g-3 mt-1">
     <div class="col-lg-4">
       <div class="card shadow-sm mb-3">
@@ -54,6 +89,20 @@
     </div>
 
     <div class="col-lg-8">
+      <div class="card shadow-sm mb-3">
+        <div class="card-header fw-bold">🤝 Cash handovers (rider ke bheje hue)</div>
+        <div class="table-responsive"><table class="table table-sm mb-0">
+          <thead class="table-light"><tr><th>Waqt</th><th>Receiver</th><th class="text-end">Raqam</th><th>Status</th><th>Tafseel</th></tr></thead>
+          {% for h in recent_handovers %}
+          <tr><td>{{ h.created_at|date:"d M, h:i A" }}</td>
+              <td>{% if h.receiver == 'vendor' %}Vendor: {{ h.vendor.name|default:"—" }}{% else %}Admin{% endif %}</td>
+              <td class="text-end">Rs. {{ h.amount|floatformat:0 }}</td>
+              <td>{% if h.status == 'confirmed' %}<span class="badge bg-success">Confirmed</span>{% elif h.status == 'rejected' %}<span class="badge bg-danger">Rejected</span>{% else %}<span class="badge bg-warning text-dark">Pending</span>{% endif %}</td>
+              <td class="small">{% if h.status == 'rejected' %}{{ h.reject_reason }}{% elif h.decided_by %}{{ h.decided_by.username }}, {{ h.decided_at|date:"d M h:i A" }}{% else %}{{ h.note|default:"—" }}{% endif %}</td></tr>
+          {% empty %}<tr><td colspan="5" class="text-center text-muted py-3">Abhi koi handover nahi.</td></tr>{% endfor %}
+        </table></div>
+      </div>
+
       <div class="card shadow-sm mb-3">
         <div class="card-header fw-bold">Hisab ki history</div>
         <div class="table-responsive"><table class="table table-sm mb-0">

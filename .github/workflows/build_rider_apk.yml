@@ -1,0 +1,79 @@
+name: Build Rider APK (88 Riders)
+
+# Manual chalayein: GitHub > Actions > "Build Rider APK (88 Riders)" > Run workflow
+# Server fixed hai: https://khanewalconnect.store (app mein kahin dikhta nahi).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'rider_app/**'
+      - '.github/workflows/build_rider_apk.yml'
+
+env:
+  APP_NAME: '88 Riders'
+  # Android package name (applicationId). Digit se shuru hone wala hissa Android mein allowed nahi,
+  # is liye 88riders ki jagah riders88.
+  APP_ID: 'com.khanewal.riders88.app'
+  API_BASE: 'https://khanewalconnect.store'
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rider_app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Android project banao (sirf android folder)
+        run: flutter create --platforms=android --org com.khanewal --project-name kconn_rider .
+
+      - name: Package name (applicationId) lagao
+        run: python3 tool/patch_gradle.py android/app "$APP_ID"
+
+      - name: Permissions + app naam lagao
+        run: python3 tool/patch_manifest.py android/app/src/main/AndroidManifest.xml
+
+      # Push notification (app band ho tab bhi naya order alert).
+      # GitHub Secret GOOGLE_SERVICES_JSON = Firebase ki google-services.json ka poora text.
+      # Secret na ho to APK phir bhi ban jati hai, bas push band rehta hai.
+      - name: Push notification setup (Firebase)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "google-services.json likh di."
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON secret nahi mila - APK ban jayegi lekin push notification band rahegi."
+          fi
+          python3 tool/patch_push.py android "$APP_ID"
+
+      - name: Purana auto-generated test hatao
+        run: rm -rf test
+
+      - run: flutter pub get
+
+      - name: App icon banao
+        run: dart run flutter_launcher_icons
+
+      - name: Build release APK
+        run: flutter build apk --release --dart-define=API_BASE=${{ env.API_BASE }}
+
+      - name: APK ka naam
+        run: cp build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/88-Riders.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 88-riders-apk
+          path: rider_app/build/app/outputs/flutter-apk/88-Riders.apk

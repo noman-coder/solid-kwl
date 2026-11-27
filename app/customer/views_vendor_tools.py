@@ -56,8 +56,11 @@ def _period(request):
     return key, days, start_date, today, start
 
 
-def _analytics_data(vendor, profile, start_date, today, start):
+def _analytics_data(vendor, profile, start_date, today, start, end=None):
+    """`end` (optional, exclusive datetime): custom date range ke liye (vendor app V11). Web `end` nahi deta, to wahi purana rawayya."""
     orders = SaleOrder.objects.filter(vendor=vendor, order_date__gte=start)
+    if end is not None:
+        orders = orders.filter(order_date__lt=end)
     live_orders = orders.exclude(status='cancelled')
     items = SaleOrderItem.objects.filter(order__in=live_orders)
 
@@ -230,6 +233,51 @@ def vendor_quick_update(request):
     })
 
 
+def quick_update_product(product, price_raw, discount_raw, add_raw, pct, vendor, warehouse):
+    """Ek product ki price / discount / naya stock (web quick-update aur vendor app API ki SHARED logic).
+
+    Return: (status, errors)  status: 'changed' | 'same' | 'error'.
+    Validation, batch repricing aur stock add bilkul wahi hai jo web page mein tha.
+    Paisa/stock ka kaam transaction.atomic + select_for_update mein hota hai (double tap/do phone safe).
+    """
+    name = product.name
+    row_errors = []
+    price = _dec(price_raw, Decimal('0.01'), MAX_PRICE, 'price', row_errors, name)
+    discount = _dec(discount_raw or '0', Decimal('0'), Decimal('90'), 'discount (0-90)', row_errors, name)
+    add = _dec(add_raw or '0', Decimal('0'), Decimal('1000000'), 'naya stock', row_errors, name)
+    if row_errors:
+        return 'error', row_errors
+
+    price = price.quantize(CENT)
+    add_qty = float(add)
+    try:
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(pk=product.pk, vendor=vendor)
+            same = (price == product.original_price and discount == (product.discount_percentage or 0)
+                    and add_qty <= 0)
+            if same:
+                return 'same', []
+            product.original_price = price
+            product.price = price
+            product.discount_percentage = discount
+            product._image_processed = True      # image dobara process na ho
+            product.save()
+            reprice_open_batches(product, price, discount, pct)
+            if add_qty > 0:
+                if not warehouse:
+                    raise ValidationError('Shop mein warehouse set nahi hai')
+                _add_stock(product, warehouse, add_qty, vendor_share(price, discount, pct), price)
+        return 'changed', []
+    except ValidationError as exc:
+        try:
+            return 'error', [f'{name}: ' + '; '.join(exc.messages)]
+        except Exception:
+            return 'error', [f'{name}: update nahi ho saka']
+    except Exception:
+        logger.exception('Vendor quick update error (product %s)', product.pk)
+        return 'error', [f'{name}: update nahi ho saka']
+
+
 def _quick_update_save(request, profile, vendor, warehouse):
     post = request.POST
     pct = commission_percent(profile)
@@ -246,45 +294,13 @@ def _quick_update_save(request, profile, vendor, warehouse):
         product = products.get(pid)            # sirf apna product; baaqi chupchap chhor do
         if not product:
             continue
-        name = product.name
-        row_errors = []
-        price = _dec(post.get(f'price_{pid}'), Decimal('0.01'), MAX_PRICE, 'price', row_errors, name)
-        discount = _dec(post.get(f'discount_{pid}') or '0', Decimal('0'), Decimal('90'),
-                        'discount (0-90)', row_errors, name)
-        add = _dec(post.get(f'add_{pid}') or '0', Decimal('0'), Decimal('1000000'),
-                   'naya stock', row_errors, name)
-        if row_errors:
+        status, row_errors = quick_update_product(
+            product, post.get(f'price_{pid}'), post.get(f'discount_{pid}') or '0',
+            post.get(f'add_{pid}') or '0', pct, vendor, warehouse)
+        if status == 'error':
             errors.extend(row_errors)
-            continue
-
-        price = price.quantize(CENT)
-        add_qty = float(add)
-        same = (price == product.original_price and discount == (product.discount_percentage or 0)
-                and add_qty <= 0)
-        if same:
-            continue
-
-        try:
-            with transaction.atomic():
-                product.original_price = price
-                product.price = price
-                product.discount_percentage = discount
-                product._image_processed = True      # image dobara process na ho
-                product.save()
-                reprice_open_batches(product, price, discount, pct)
-                if add_qty > 0:
-                    if not warehouse:
-                        raise ValidationError('Shop mein warehouse set nahi hai')
-                    _add_stock(product, warehouse, add_qty, vendor_share(price, discount, pct), price)
+        elif status == 'changed':
             changed += 1
-        except ValidationError as exc:
-            try:
-                errors.append(f'{name}: ' + '; '.join(exc.messages))
-            except Exception:
-                errors.append(f'{name}: update nahi ho saka')
-        except Exception:
-            logger.exception('Vendor quick update error (product %s)', pid)
-            errors.append(f'{name}: update nahi ho saka')
 
     for e in errors[:10]:
         messages.error(request, f'❌ {e}')

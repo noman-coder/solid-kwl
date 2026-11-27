@@ -278,6 +278,12 @@ def notify_vendor_new_order(order):
     prof = get_store_profile(order.vendor_id)
     if not prof:
         return
+    try:
+        # Phone par push (app band ho tab bhi). Fail ho to order kabhi na ruke.
+        from .. import vendor_push
+        vendor_push.notify_new_order(order.pk)
+    except Exception:
+        logger.exception('Vendor push (new order) hook failed')
     items = order.items.count()
     _notify(
         prof.user,

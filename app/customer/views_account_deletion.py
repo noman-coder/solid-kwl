@@ -196,6 +196,39 @@ def delete_account_customer(request):
 # VENDOR
 # ============================================
 
+def vendor_has_active_orders(vendor):
+    """Store ke koi order abhi chal rahe hon to account delete nahi hota (web + vendor app dono)."""
+    return SaleOrder.objects.filter(vendor=vendor, status__in=ACTIVE_ORDER_STATUSES).exists()
+
+
+def wipe_vendor_account(user):
+    """Vendor ka store + personal data saaf karo aur login band karo (web aur vendor app dono yahi use karte hain).
+
+    Profile row rehti hai (settlement / commission reports uspar khade hain). Raise karta hai agar kuch bigre -
+    caller transaction / message sambhalta hai. Vendor app ke push tokens bhi hat jate hain (delete ke baad alert nahi).
+    """
+    from ..models import Product, Vendor, VendorProfile, VendorPushToken
+
+    profile = user.vendor_profile
+    vendor = profile.vendor
+    with transaction.atomic():
+        # Hide the store and all its products.
+        Product.objects.filter(vendor=vendor).update(is_active=False)
+
+        _drop_file(profile.logo)
+        _drop_file(profile.cover_image)
+        VendorProfile.objects.filter(pk=profile.pk).update(
+            business_name='Deleted Store', city='', store_description='',
+            logo='', cover_image='', delivery_areas='',
+            store_status='closed', is_approved=False,
+        )
+        Vendor.objects.filter(pk=vendor.pk).update(
+            name='Deleted Vendor', contact_number=None, address=None,
+        )
+        VendorPushToken.objects.filter(profile=profile).delete()
+        _close_login(user, 'vendor')
+
+
 @vendor_login_required
 @require_POST
 def delete_account_vendor(request):
@@ -206,7 +239,7 @@ def delete_account_vendor(request):
     profile = user.vendor_profile
     vendor = profile.vendor
 
-    if SaleOrder.objects.filter(vendor=vendor, status__in=ACTIVE_ORDER_STATUSES).exists():
+    if vendor_has_active_orders(vendor):
         messages.error(
             request,
             '⚠️ You still have open store orders. Please complete or reject them first, '
@@ -215,23 +248,7 @@ def delete_account_vendor(request):
         return redirect('vendor_dashboard')
 
     try:
-        with transaction.atomic():
-            from ..models import Product, Vendor, VendorProfile
-
-            # Hide the store and all its products.
-            Product.objects.filter(vendor=vendor).update(is_active=False)
-
-            _drop_file(profile.logo)
-            _drop_file(profile.cover_image)
-            VendorProfile.objects.filter(pk=profile.pk).update(
-                business_name='Deleted Store', city='', store_description='',
-                logo='', cover_image='', delivery_areas='',
-                store_status='closed', is_approved=False,
-            )
-            Vendor.objects.filter(pk=vendor.pk).update(
-                name='Deleted Vendor', contact_number=None, address=None,
-            )
-            _close_login(user, 'vendor')
+        wipe_vendor_account(user)
     except Exception:
         logger.exception("Vendor account deletion failed")
         messages.error(request, '❌ Something went wrong. Your account was not deleted. Please contact support.')
