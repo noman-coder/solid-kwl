@@ -173,6 +173,20 @@ class Api {
     );
   }
 
+  /// Jab server ka jawab JSON na ho (message khali): asal wajah dhoondne ke liye jawab ka chhota hissa dikhao.
+  static String _diag(http.Response r) {
+    var t = '';
+    try {
+      t = utf8.decode(r.bodyBytes, allowMalformed: true);
+    } catch (_) {}
+    t = t.replaceAll(RegExp(r'<[^>]*>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (t.length > 100) t = t.substring(0, 100);
+    final srv = r.headers['server'] ?? '-';
+    final ct = (r.headers['content-type'] ?? '-').split(';').first;
+    final ray = r.headers.containsKey('cf-ray') ? 'cf' : 'no-cf';
+    return '[$srv | $ct | $ray] $t';
+  }
+
   /// Server ka jawab JSON mein kholo; galti ho to ApiException.
   static Map<String, dynamic> _decode(http.Response r) {
     var data = <String, dynamic>{};
@@ -186,7 +200,7 @@ class Api {
         msg = 'Photo server ke liye bohat bari hai. Chhoti photo chunein.';
       }
       throw ApiException(
-        msg.isEmpty ? 'Kuch masla aa gaya (${r.statusCode}). Dobara koshish karein.' : msg,
+        msg.isEmpty ? 'Kuch masla aa gaya (${r.statusCode}). Dobara koshish karein.\n${_diag(r)}' : msg,
         r.statusCode,
         code: s(data['code']).isEmpty ? 'error' : s(data['code']),
         errors: data['errors'] is List
