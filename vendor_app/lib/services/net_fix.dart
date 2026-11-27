@@ -28,7 +28,7 @@ class DnsFallbackOverrides extends HttpOverrides {
       final Future<Socket> secured = task.socket.then<Socket>(
         (Socket raw) => SecureSocket.secure(raw, host: url.host, context: context),
       );
-      return ConnectionTask<Socket>.fromSocket(secured, task.cancel);
+      return _SecuredTask(secured, task.cancel);
     };
     return client;
   }
@@ -105,4 +105,16 @@ class _Cached {
   final DateTime at = DateTime.now();
   _Cached(this.addrs);
   bool get valid => DateTime.now().difference(at) < const Duration(minutes: 10);
+}
+
+/// HttpClient ko sirf `socket` (Future) aur `cancel()` chahiye. ConnectionTask ka apna constructor public nahi,
+/// isliye yahan interface implement kiya hai (SDK ke har version par chalta hai).
+class _SecuredTask implements ConnectionTask<Socket> {
+  @override
+  final Future<Socket> socket;
+  final void Function() _onCancel;
+  _SecuredTask(this.socket, this._onCancel);
+
+  @override
+  void cancel() => _onCancel();
 }
