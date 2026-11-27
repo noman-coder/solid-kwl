@@ -43,6 +43,9 @@ class Api {
     return Uri.parse('$base$path');
   }
 
+  /// Cloudflare / gateway ke 52x aur 502-504: server tak raasta nahi bana (VPN ke baghair aksar 522).
+  static bool _gateway(int s) => s == 502 || s == 503 || s == 504 || (s >= 520 && s <= 524);
+
   static Future<Map<String, dynamic>> _req(String method, String path,
       {Map<String, dynamic>? body}) async {
     final headers = <String, String>{
@@ -50,18 +53,35 @@ class Api {
       'Accept': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
-    http.Response r;
-    try {
-      if (method == 'GET') {
-        r = await http.get(_u(path), headers: headers).timeout(const Duration(seconds: 20));
-      } else {
-        r = await http
-            .post(_u(path), headers: headers, body: jsonEncode(body ?? <String, dynamic>{}))
-            .timeout(const Duration(seconds: 20));
+    final attempts = method == 'GET' ? 3 : 1; // POST dobara nahi bheja jata (double action na ho)
+    http.Response? resp;
+    for (var i = 0; i < attempts; i++) {
+      try {
+        http.Response x;
+        if (method == 'GET') {
+          x = await http.get(_u(path), headers: headers).timeout(const Duration(seconds: 25));
+        } else {
+          x = await http
+              .post(_u(path), headers: headers, body: jsonEncode(body ?? <String, dynamic>{}))
+              .timeout(const Duration(seconds: 25));
+        }
+        if (_gateway(x.statusCode) && i < attempts - 1) {
+          await Future.delayed(Duration(seconds: i + 1));
+          continue;
+        }
+        resp = x;
+        break;
+      } catch (_) {
+        if (i < attempts - 1) {
+          await Future.delayed(Duration(seconds: i + 1));
+          continue;
+        }
       }
-    } catch (_) {
-      throw ApiException('Internet ya server se rabta nahi ho raha', 0);
     }
+    if (resp == null || _gateway(resp.statusCode)) {
+      throw ApiException('Internet ya server se rabta nahi ho raha. Thori dair baad dobara koshish karein.', 0);
+    }
+    final r = resp;
     Map<String, dynamic> data = <String, dynamic>{};
     try {
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));

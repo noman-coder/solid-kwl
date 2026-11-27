@@ -1,3 +1,4 @@
+import 'dart:io' show HttpOverrides;
 import 'package:flutter/material.dart';
 
 import 'screens/login.dart';
@@ -5,10 +6,12 @@ import 'screens/shell.dart';
 import 'services/api.dart';
 import 'services/push.dart';
 import 'services/tracker.dart';
+import 'services/net_fix.dart';
 import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = DnsFallbackOverrides(); // ISP DNS kharab ho to DoH se chale
   await Push.init(); // Firebase (push notification). Config na ho to khamoshi se band.
   runApp(const RiderApp());
 }

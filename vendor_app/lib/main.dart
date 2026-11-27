@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show HttpOverrides;
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/foundation.dart';
@@ -10,6 +11,7 @@ import 'services/api.dart';
 import 'services/app_state.dart';
 import 'services/prefs.dart';
 import 'services/push.dart';
+import 'services/net_fix.dart';
 import 'theme.dart';
 import 'utils.dart' show kAppName;
 import 'widgets/crash_view.dart';
@@ -18,6 +20,7 @@ Future<void> main() async {
   // Phase V17 crash safety: koi bhi ghair-mutawaqqa galti app ko band na kare (log hoti hai, app chalti rehti hai)
   runZonedGuarded<Future<void>>(() async {
     WidgetsFlutterBinding.ensureInitialized();
+    HttpOverrides.global = DnsFallbackOverrides(); // ISP DNS kharab ho to DoH se chale
     FlutterError.onError = (details) {
       FlutterError.presentError(details);
       debugPrint('FlutterError: ${details.exceptionAsString()}');

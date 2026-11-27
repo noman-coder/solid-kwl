@@ -143,6 +143,9 @@ class Api {
 
   /// Timeout ya net toot'ne par GET ek dafa khud dobara try hota hai (sust / VPN wale net par aksar dusri koshish chal jati hai).
   /// POST kabhi khud dobara nahi bheja jata (double action / double order na ho).
+  /// Cloudflare / gateway ke 52x aur 502-504: server tak raasta nahi bana (VPN ke baghair aksar 522).
+  static bool _gateway(int s) => s == 502 || s == 503 || s == 504 || (s >= 520 && s <= 524);
+
   static Future<Map<String, dynamic>> _req(String method, String path,
       {Map<String, dynamic>? body, bool notifyAuth = true}) async {
     final sentToken = token;
@@ -151,24 +154,29 @@ class Api {
       'Accept': 'application/json',
       if (sentToken != null) 'Authorization': 'Bearer $sentToken',
     };
-    final attempts = method == 'GET' ? 2 : 1;   // sirf GET dobara (POST / DELETE nahi)
+    final attempts = method == 'GET' ? 3 : 1;   // sirf GET dobara (POST / DELETE nahi)
     var timedOut = false;
     for (var i = 0; i < attempts; i++) {
       try {
         http.Response r;
         if (method == 'GET') {
-          r = await http.get(_u(path), headers: headers).timeout(const Duration(seconds: 20));
+          r = await http.get(_u(path), headers: headers).timeout(const Duration(seconds: 25));
         } else if (method == 'DELETE') {
-          r = await http.delete(_u(path), headers: headers).timeout(const Duration(seconds: 20));
+          r = await http.delete(_u(path), headers: headers).timeout(const Duration(seconds: 25));
         } else {
           r = await http
               .post(_u(path), headers: headers, body: jsonEncode(body ?? <String, dynamic>{}))
-              .timeout(const Duration(seconds: 20));
+              .timeout(const Duration(seconds: 25));
         }
         final out = _decode(r);
         if (offline.value) offline.value = false;
         return out;
       } on ApiException catch (e) {
+        if (_gateway(e.status)) {
+          if (i < attempts - 1) { await Future.delayed(Duration(seconds: i + 1)); continue; }
+          offline.value = true;
+          throw ApiException('Server tak raasta nahi ban raha. Thori dair baad dobara koshish karein.', e.status, code: 'network');
+        }
         if (offline.value) offline.value = false; // server ne jawab diya = net chal raha hai
         // Is token se request gayi aur server ne kaha "dobara login": session khatam
         if (e.authExpired && notifyAuth && sentToken != null && token == sentToken) {
