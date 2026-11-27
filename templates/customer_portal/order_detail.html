@@ -96,6 +96,47 @@
         <a href="tel:{{ rider_di.rider.phone }}" class="ms-2">📞 {{ rider_di.rider.phone }}</a>
     </div></div>
     {% endif %}
+
+    {% if show_live %}
+    <div class="card border-0 shadow-sm mb-3" id="liveCard">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <b>📍 Rider live location</b>
+          <small id="liveInfo" class="text-muted">Load ho raha hai...</small>
+        </div>
+        <div id="liveMap" style="height:320px;border-radius:12px"></div>
+      </div>
+    </div>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script>
+    (function(){
+      if (typeof L === 'undefined') { document.getElementById('liveInfo').textContent = 'Map load nahi hua'; return; }
+      var map = L.map('liveMap').setView([30.37, 69.34], 5), rider = null, fitted = false, t;
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {maxZoom: 19, attribution: '&copy; OpenStreetMap'}).addTo(map);
+      var storeDone = false, destDone = false, info = document.getElementById('liveInfo');
+      function pin(ll, label){ return L.marker(ll).addTo(map).bindTooltip(label); }
+      function tick(){
+        fetch("{% url 'order_live_location' order.id %}", {credentials: 'same-origin'})
+          .then(function(r){ return r.json(); }).then(function(d){
+            if (!d.active) { info.textContent = 'Delivery mukammal / tracking band'; clearInterval(t); return; }
+            if (d.store && !storeDone) { pin(d.store, 'Store'); storeDone = true; }
+            if (d.dest && !destDone) { pin(d.dest, 'Aap ki location'); destDone = true; }
+            if (d.pos) {
+              if (!rider) rider = L.marker(d.pos, {zIndexOffset: 1000}).addTo(map).bindTooltip(d.rider);
+              else rider.setLatLng(d.pos);
+              if (!fitted) { map.setView(d.pos, 15); fitted = true; }
+              info.textContent = d.stale ? 'Rider ki location ruk gayi (' + d.age_sec + 's pehle)'
+                                         : 'Live - ' + d.age_sec + 's pehle';
+            } else { info.textContent = 'Rider ki location ka intezar...'; }
+          }).catch(function(){});
+      }
+      tick(); t = setInterval(tick, 8000);
+    })();
+    </script>
+    {% endif %}
+
     {% endif %}
 
     {% if can_review %}
@@ -205,16 +246,22 @@
                                 {% endfor %}
                             </tbody>
                             <tfoot class="table-light">
-                                {% if is_store_order %}
+                                {% if is_store_order or order.discount_value > 0 %}
                                 <tr>
                                     <td colspan="3" class="text-end">Delivery fee:</td>
-                                    <td class="text-end">Rs. {{ order.delivery_fee|floatformat:0 }}</td>
+                                    <td class="text-end">{% if order.delivery_fee > 0 %}Rs. {{ order.delivery_fee|floatformat:0 }}{% else %}<span class="text-success">FREE</span>{% endif %}</td>
+                                </tr>
+                                {% endif %}
+                                {% if order.discount_value > 0 %}
+                                <tr>
+                                    <td colspan="3" class="text-end text-success">🎟️ Coupon{% if order.coupon_code %} {{ order.coupon_code }}{% endif %}:</td>
+                                    <td class="text-end text-success">- Rs. {{ order.discount_value|floatformat:0 }}</td>
                                 </tr>
                                 {% endif %}
                                 <tr>
                                     <td colspan="3" class="text-end fw-bold">Total:</td>
                                     <td class="text-end fw-bold text-success fs-5">
-                                        Rs. {% if is_store_order %}{{ grand_total|floatformat:0 }}{% else %}{{ total_amount|floatformat:2 }}{% endif %}
+                                        Rs. {% if is_store_order or order.discount_value > 0 %}{{ grand_total|floatformat:0 }}{% else %}{{ total_amount|floatformat:2 }}{% endif %}
                                     </td>
                                 </tr>
                             </tfoot>
@@ -261,6 +308,19 @@
                 </div>
             </div>
             {% endif %}
+
+            <!-- Reorder -->
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-body">
+                    <form method="post" action="{% url 'reorder_order' order.id %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-arrow-repeat"></i> Dobara order karein
+                        </button>
+                    </form>
+                    <small class="text-muted d-block mt-2">Yehi products aaj ki price aur stock ke hisaab se cart mein aa jayenge.</small>
+                </div>
+            </div>
 
             <!-- Cancel Button -->
             {% if order.status == 'pending' or order.status == 'confirmed' and not order.vendor_id %}

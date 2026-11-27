@@ -122,6 +122,27 @@
 
   <div class="sd-hero" {% if store.cover_image %}style="background-image:url('{{ store.cover_image.url }}')"{% endif %}>
     <a class="sd-back" href="{% url 'store_list' %}" aria-label="Sab stores"><i class="bi bi-arrow-left"></i></a>
+    <button type="button" id="sdFav" aria-label="Favorite store" data-url="{% url 'store_favorite_toggle' store.id %}"
+            style="position:absolute;top:12px;right:12px;z-index:2;width:40px;height:40px;border-radius:50%;border:0;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.2);color:#e11d48;font-size:18px;cursor:pointer;">
+      <i class="bi {% if is_favorite %}bi-heart-fill{% else %}bi-heart{% endif %}"></i>
+    </button>
+    <script>
+    (function () {
+        var b = document.getElementById('sdFav');
+        if (!b) return;
+        b.addEventListener('click', function () {
+            b.disabled = true;
+            fetch(b.dataset.url, {method: 'POST', credentials: 'same-origin',
+                headers: {'X-CSRFToken': getCookie('csrftoken'), 'X-Requested-With': 'XMLHttpRequest'}})
+            .then(function (r) { if (r.redirected) { location.href = r.url; return null; } return r.json(); })
+            .then(function (d) {
+                b.disabled = false;
+                if (d && d.success) { b.querySelector('i').className = 'bi ' + (d.saved ? 'bi-heart-fill' : 'bi-heart'); }
+                else if (d && d.message) { alert(d.message); }
+            }).catch(function () { b.disabled = false; });
+        });
+    })();
+    </script>
     {% if status == 'closed' %}<div class="sd-closed-veil">CLOSED</div>{% endif %}
   </div>
 
@@ -136,6 +157,15 @@
       </div>
     </div>
 
+    {% if store_coupons %}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+      {% for c in store_coupons %}
+      <a href="{% url 'my_coupons' %}" style="text-decoration:none;background:#fff7ed;color:#c2410c;border:1px dashed #fb923c;border-radius:12px;padding:5px 12px;font-size:13px;font-weight:700;">
+        🎟️ {{ c.code }} &middot; {{ c.short_label }}{% if c.min_order > 0 %} (Rs. {{ c.min_order|floatformat:0 }}+){% endif %}
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
     <div class="sd-stats">
       <div class="sd-stat"><div class="k">Rating</div><div class="v">{% if reviews.summary.avg %}<a href="#reviews" style="color:inherit;"><i class="bi bi-star-fill" style="color:#f59e0b;"></i> {{ reviews.summary.avg }} <small>({{ reviews.summary.count }})</small></a>{% else %}New{% endif %}</div></div>
       <div class="sd-stat"><div class="k">Delivery time</div><div class="v"><i class="bi bi-clock"></i>{{ store.delivery_time_min }}-{{ store.delivery_time_max }} min</div></div>
@@ -236,11 +266,12 @@
       </div>
     </div>
     {% for rv in reviews.latest %}
-      {% if rv.comment or forloop.first %}
+      {% if rv.comment or rv.reply or forloop.first %}
       <div style="border-top:1px solid #f0f0f5;margin-top:12px;padding-top:10px;">
         <div style="display:flex;justify-content:space-between;"><b>{{ rv.name }}</b><small style="color:#6b7280;">{{ rv.date|date:"d M Y" }}</small></div>
         <div style="color:#f59e0b;">{% for i in "12345" %}{% if forloop.counter <= rv.stars %}★{% else %}<span style="color:#d1d5db;">★</span>{% endif %}{% endfor %}</div>
         {% if rv.comment %}<div style="margin-top:2px;">{{ rv.comment }}</div>{% endif %}
+        {% if rv.reply %}<div style="margin-top:6px;background:#f3f4f6;border-radius:10px;padding:8px 10px;font-size:14px;"><b><i class="bi bi-reply-fill"></i> Store ka jawab:</b> {{ rv.reply }}</div>{% endif %}
       </div>
       {% endif %}
     {% endfor %}

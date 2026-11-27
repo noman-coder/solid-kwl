@@ -1,0 +1,91 @@
+name: Build Customer APK
+
+# Manual chalayein: GitHub > Actions > "Build Customer APK" > Run workflow
+# Server fixed hai: https://khanewalconnect.store (app mein kahin dikhta nahi).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'customer_app/**'
+      - '.github/workflows/build_customer_apk.yml'
+
+env:
+  # App ka naam / package / server - sirf yahin se badlein (placeholder naam).
+  APP_NAME: 'Customer App'
+  APP_ID: 'com.khanewal.customer.app'
+  API_BASE: 'https://khanewalconnect.store'
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: customer_app
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build se pehle chhoti jaanch (bina Flutter): imports, brackets, server URL / secret leak. Fail ho to build nahi chalti.
+      - name: Customer app ki static jaanch
+        run: python3 tool/check_app.py
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Android project banao (sirf android folder)
+        run: flutter create --platforms=android --org com.khanewal --project-name kconn_customer .
+
+      - name: Package name (applicationId) lagao
+        run: python3 tool/patch_gradle.py android/app "$APP_ID"
+
+      - name: Permissions + app naam lagao
+        run: python3 tool/patch_manifest.py android/app/src/main/AndroidManifest.xml "$APP_NAME"
+
+      # Push notification. GitHub Secret GOOGLE_SERVICES_JSON_CUSTOMER = customer app ki (alag Android app,
+      # package com.khanewal.customer.app) Firebase google-services.json ka poora text.
+      # Vendor / rider wali google-services.json yahan nahi chalegi (package alag hai).
+      # Secret na ho to APK phir bhi ban jati hai, bas push band rehta hai.
+      - name: Push notification setup (Firebase)
+        env:
+          GOOGLE_SERVICES_JSON_CUSTOMER: ${{ secrets.GOOGLE_SERVICES_JSON_CUSTOMER }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_CUSTOMER" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_CUSTOMER" > android/app/google-services.json
+            echo "google-services.json likh di."
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON_CUSTOMER secret nahi mila - APK ban jayegi lekin push notification band rahegi."
+          fi
+          python3 tool/patch_push.py android "$APP_ID"
+
+      # Notification ka narangi rang (FCM default colour)
+      - name: Notification rang lagao
+        run: python3 tool/patch_notification.py android
+
+      - name: Purana auto-generated test hatao
+        run: rm -rf test
+
+      - run: flutter pub get
+
+      - name: App icon banao
+        run: dart run flutter_launcher_icons
+
+      # Splash screen (narangi + icon) - flutter_native_splash
+      - name: Splash screen banao
+        run: dart run flutter_native_splash:create
+
+      - name: Build release APK
+        run: flutter build apk --release --dart-define=API_BASE=${{ env.API_BASE }} --dart-define=APP_NAME="${{ env.APP_NAME }}"
+
+      - name: APK ka naam
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Customer-App.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: customer-apk
+          path: customer_app/build/app/outputs/flutter-apk/Customer-App.apk

@@ -139,16 +139,28 @@ def auto_place_order(request, customer):
                 return None, store_error
             delivery_charges = cart_data['delivery_charges']
 
+            # Step 5c: Coupon (agar customer ne lagaya ho) - dobara parkho, naakaam ho to order na banao
+            from . import coupons as coupon_engine
+            coupon_res = coupon_engine.evaluate_session(
+                request, customer, cart, cart_data['subtotal'], delivery_charges)
+            if coupon_res is not None and not coupon_res.ok:
+                return None, f"Coupon: {coupon_res.message}. Checkout par dobara dekh kar order karein."
+            coupon_on = bool(coupon_res and coupon_res.ok)
+            order_fields = store_orders.store_order_fields(cart, cart_data, payment_method)
+            if coupon_on and coupon_res.free_delivery:
+                order_fields['delivery_fee'] = Decimal('0.00')
+
             # Step 6: Create order
             order = SaleOrder.objects.create(
-                **store_orders.store_order_fields(cart, cart_data, payment_method),
+                **order_fields,
                 customer=customer,
                 warehouse=warehouse,
                 order_date=now(),
                 status='pending',
                 notes=(f"🌐 WEB ORDER (OTP Verified) | Payment: {payment_method} | "
-                       f"Delivery: {delivery_type} Rs. {delivery_charges}"),
-                discount_value=Decimal('0.00'),
+                       f"Delivery: {delivery_type} Rs. {delivery_charges}"
+                       + (f" | Coupon {coupon_res.coupon.code}: -Rs. {coupon_res.total_saving}" if coupon_on else '')),
+                discount_value=coupon_res.discount if coupon_on else Decimal('0.00'),
                 advance_payment=Decimal('0.00'),
                 created_by=customer.portal_profile.user,
             )
@@ -179,6 +191,13 @@ def auto_place_order(request, customer):
                     'total': float(item_total),
                 })
             
+            # Step 7b: Coupon ka istemal likho (limit lock ke saath)
+            if coupon_on:
+                coupon_applied, _disc, _fee = coupon_engine.apply_to_new_order(
+                    coupon_res, order, customer, delivery_charges)
+                if coupon_applied:
+                    total_amount = max(Decimal('0.00'), total_amount - coupon_res.discount)
+
             # Step 8: Trust update
             customer.portal_profile.record_successful_order()
             
@@ -195,6 +214,7 @@ def auto_place_order(request, customer):
             request.session.pop('order_token', None)
             request.session.pop('selected_payment', None)
             request.session.pop('delivery_type', None)
+            request.session.pop('coupon_code', None)
             request.session.modified = True
             request.session.save()
 

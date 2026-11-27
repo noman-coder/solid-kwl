@@ -20,10 +20,36 @@ admin.site.register(CompanyInfo, CompanyInfoAdmin)
 admin.site.register(Brand)
 
 
+@admin.action(description="AI se master category dobara chunein (manual wali bhi)")
+def reclassify_categories(modeladmin, request, queryset):
+    from ..category_ai import assign_master
+    n = 0
+    for c in queryset:
+        if assign_master(c, force=True):
+            n += 1
+    modeladmin.message_user(request, f"{n} categories ko master mil gaya.")
+
+
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'min_margin_percent')
+    list_display = ('name', 'master', 'master_source', 'min_margin_percent')
+    list_filter = ('master', 'master_source')
     search_fields = ('name',)
-    fields = ('name', 'min_margin_percent')
+    fields = ('name', 'master', 'min_margin_percent')
+    actions = [reclassify_categories]
+
+    def save_model(self, request, obj, form, change):
+        if 'master' in form.changed_data and obj.master_id:
+            obj.master_source = 'manual'          # admin ka chuna hua AI kabhi nahi badlegi
+        super().save_model(request, obj, form, change)
+
+
+class MasterCategoryAdmin(admin.ModelAdmin):
+    list_display = ('name', 'icon', 'sort_order', 'is_active')
+    list_editable = ('icon', 'sort_order', 'is_active')
+    search_fields = ('name',)
+
+
+admin.site.register(MasterCategory, MasterCategoryAdmin)
 
 
 admin.site.register(Category, CategoryAdmin)

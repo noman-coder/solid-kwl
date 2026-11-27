@@ -129,6 +129,8 @@ class OrderReview(models.Model):
     vendor_comment = models.CharField(max_length=300, blank=True, default='')
     rider_rating = models.PositiveSmallIntegerField(null=True, blank=True)
     rider_comment = models.CharField(max_length=300, blank=True, default='')
+    vendor_reply = models.CharField(max_length=300, blank=True, default='')
+    vendor_replied_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

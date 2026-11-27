@@ -75,6 +75,14 @@ def rate_order(request, order_id):
         messages.info(request, 'Aap is order ki rating de chuke hain.')
         return redirect('order_detail_customer', order_id=order.id)
 
+    # Vendor app ko push (store ki rating par; fail ho to rating phir bhi save hai)
+    try:
+        if vendor_stars:
+            from .. import vendor_push
+            vendor_push.notify_new_review(order.pk)
+    except Exception:
+        logger.exception('Vendor push (review) hook error')
+
     # Store aur rider ko khabar
     try:
         if vendor_stars:
@@ -117,5 +125,6 @@ def store_reviews(vendor, limit=10):
     latest = []
     for rv in qs.select_related('sale_order__customer')[:limit]:
         latest.append({'stars': rv.vendor_rating, 'comment': rv.vendor_comment,
-                       'name': _reviewer_name(rv.sale_order), 'date': rv.created_at})
+                       'name': _reviewer_name(rv.sale_order), 'date': rv.created_at,
+                       'reply': rv.vendor_reply})
     return {'summary': summary, 'bars': bars, 'latest': latest}

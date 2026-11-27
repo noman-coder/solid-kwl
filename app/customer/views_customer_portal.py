@@ -52,6 +52,7 @@ from ..models import (
     AdminPresence, DeliverySettings, DeliveryArea
 )
 
+from . import offers as vendor_offers
 from .payment_options import get_payment_options, clean_payment_method
 from .checkout_cart import get_checkout_cart
 from ..decorators import customer_login_required
@@ -632,6 +633,7 @@ def enrich_recently_viewed_with_prices(recently_viewed, cart=None):
             except (ValueError, TypeError):
                 pass
     
+    vendor_offers.overlay(recently_viewed)
     for product in recently_viewed:
         if product.id in rv_price_map:
             base_price = rv_price_map[product.id]
@@ -679,8 +681,14 @@ def get_product_final_price(product):
     else:
         base_price = product.price
     
-    if product.discount_percentage and product.discount_percentage > 0:
-        discount_amount = base_price * (product.discount_percentage / Decimal('100'))
+    discount = product.discount_percentage
+    if not hasattr(product, 'offer_percent'):        # offer (V13-B) abhi memory mein nahi laga -> yahin laga lo
+        try:
+            discount = vendor_offers.effective_discount(product)
+        except Exception:
+            discount = product.discount_percentage
+    if discount and discount > 0:
+        discount_amount = base_price * (discount / Decimal('100'))
         return base_price - discount_amount
     return base_price
 
@@ -725,6 +733,40 @@ def _home_categories():
     out = [{'id': c.id, 'name': c.name, 'icon': _category_emoji(c.name), 'tone': (c.id % 8) + 1} for c in rows]
     cache.set('shop_home_categories', out, 120)
     return out
+
+
+def _home_masters():
+    """Master (bari) categories jin ke andar kam az kam 1 active product ho."""
+    cached = cache.get('shop_home_masters')
+    if cached is not None:
+        return cached
+    from ..models import MasterCategory
+    rows = (MasterCategory.objects.filter(is_active=True)
+            .annotate(n=Count('categories__products', filter=Q(categories__products__is_active=True)))
+            .filter(n__gt=0).order_by('sort_order', 'name'))
+    out = [{'id': m.id, 'name': m.name, 'icon': m.icon or '🛍️', 'tone': (m.id % 8) + 1, 'n': m.n} for m in rows]
+    cache.set('shop_home_masters', out, 120)
+    return out
+
+
+def _home_tiles(master_id):
+    """Shop home ke tiles: (tiles, selected_master_name).
+    Default: master categories. ?master=<id> par: us ki sub-categories (har tile ?category= par jata hai).
+    Agar master abhi bane hi nahi (migrate/classify baaqi) to purani flat categories - page kabhi khali nahi."""
+    from ..models import MasterCategory
+    if master_id:
+        m = MasterCategory.objects.filter(pk=master_id, is_active=True).first()
+        if m:
+            subs = (Category.objects.filter(master=m, products__is_active=True)
+                    .annotate(n=Count('products', filter=Q(products__is_active=True)))
+                    .order_by('-n', 'name').only('id', 'name'))
+            tiles = [{'id': c.id, 'name': c.name, 'icon': _category_emoji(c.name), 'tone': (c.id % 8) + 1,
+                      'href': f'?category={c.id}#products-section'} for c in subs]
+            return tiles, m.name
+    masters = _home_masters()
+    if masters:
+        return [dict(m, href=f"?master={m['id']}#products-section") for m in masters], ''
+    return [dict(c, href=f"?category={c['id']}#products-section") for c in _home_categories()], ''
 
 
 def shop_home(request):
@@ -787,6 +829,14 @@ def shop_home(request):
         except (ValueError, TypeError):
             category_id = ''
     
+    master_id = ''
+    if not category_id:
+        try:
+            master_id = int(request.GET.get('master', ''))
+            products = products.filter(category__master_id=master_id)      # master khuli: us ki sab sub-categories ke products
+        except (ValueError, TypeError):
+            master_id = ''
+
     brand_id = request.GET.get('brand', '')
     if brand_id:
         try:
@@ -844,6 +894,7 @@ def shop_home(request):
         except (ValueError, TypeError):
             pass
     
+    vendor_offers.overlay(list(page_obj))
     for product in page_obj:
         product.available_stock = product.total_stock or 0
         
@@ -941,8 +992,11 @@ def shop_home(request):
         logger.error(f"Shop home banners/stores error: {e}")
         banners, featured_stores = [], []
 
+    selected_master_name = ''
     try:
-        home_categories = _home_categories()
+        home_categories, selected_master_name = _home_tiles(master_id)
+        if master_id and not selected_master_name:
+            master_id = ''
     except Exception as e:
         logger.error(f"Shop home categories error: {e}")
         home_categories = []
@@ -962,6 +1016,8 @@ def shop_home(request):
         'original_search': original_search,
         'typo_corrected': typo_corrected,
         'selected_category': category_id,
+        'selected_master': master_id,
+        'selected_master_name': selected_master_name,
         'selected_brand': brand_id,
         'selected_sort': sort,
         'selected_category_name': selected_category_name,
@@ -988,6 +1044,7 @@ def _price_products(items):
     items = list(items)
     if not items:
         return items
+    vendor_offers.overlay(items)
     ids = [p.id for p in items]
     best = {bp['product_id']: bp['best_price'] for bp in StockBatch.objects.filter(
         product_id__in=ids, remaining_qty__gt=0, selling_price__gt=0
@@ -1008,6 +1065,15 @@ def _price_products(items):
     return items
 
 
+def _in_wishlist(request, product_id):
+    """Favorites mein hai? (login na ho ya koi dikkat ho to False; page kabhi nahi tootta)"""
+    try:
+        from .views_customer_tools import wishlist_ids
+        return product_id in wishlist_ids(request)
+    except Exception:
+        return False
+
+
 def product_detail(request, pk):
     """Product detail page"""
     product = get_object_or_404(
@@ -1026,6 +1092,7 @@ def product_detail(request, pk):
         total=Sum('stock')
     )['total'] or 0
     product.available_stock = total_stock
+    vendor_offers.overlay([product])
     
     batch = StockBatch.objects.filter(
         product=product,
@@ -1057,6 +1124,7 @@ def product_detail(request, pk):
     ).exclude(id=product.id).select_related('category', 'brand')[:8]
     
     if related:
+        vendor_offers.overlay(related)
         related_ids = [p.id for p in related]
         
         related_batch_prices = StockBatch.objects.filter(
@@ -1133,6 +1201,7 @@ def product_detail(request, pk):
         'recently_viewed': recently_viewed,
         'cart_count': get_cart_count_value(request),
         'delivery_settings': delivery_settings,
+        'in_wishlist': _in_wishlist(request, product.id),
     }
     return render(request, 'customer_portal/product_detail.html', context)
 
@@ -1496,11 +1565,17 @@ def set_delivery_type(request):
             customer = request.user.customer_profile.customer
         
         data_result = calculate_cart_data(cart, customer=customer, delivery_type=delivery_type)
-        
+
+        from . import coupons as coupon_engine
+        coupon_info = coupon_engine.checkout_summary(request, customer, cart, data_result)
+
         return JsonResponse({
             'success': True,
             'delivery_charges': float(data_result['delivery_charges']),
-            'total_amount': float(data_result['total_amount']),
+            'total_amount': float(coupon_info['total']),
+            'coupon_saving': float(coupon_info['saving']),
+            'coupon_code': coupon_info['code'],
+            'coupon_error': coupon_info['error'],
             'delivery_info': {
                 'message': data_result['delivery_info']['message'],
                 'time': data_result['delivery_info']['time_estimate'],
@@ -1568,6 +1643,13 @@ def checkout(request):
         else:
             otp_masked_email = email
     
+    # ✅ Coupon (session mein ho to dobara parkh kar net total banao)
+    from . import coupons as coupon_engine
+    coupon_info = coupon_engine.checkout_summary(
+        request, profile.customer if profile else None, cart, data)
+    if coupon_info['error']:
+        messages.warning(request, f"Coupon hata diya gaya: {coupon_info['error']}")
+
     # COD + JazzCash/EasyPaisa (sirf jab company settings mein number likha ho). Bank nahi.
     payment_methods, payment_numbers = get_payment_options()
     
@@ -1579,7 +1661,8 @@ def checkout(request):
         'cart_items': data['cart_items'],
         'subtotal': data['subtotal'],
         'delivery_charges': data['delivery_charges'],
-        'total_amount': data['total_amount'],
+        'total_amount': coupon_info['total'],
+        'coupon': coupon_info,
         'delivery_info': data['delivery_info'],
         'delivery_options': data['delivery_options'],
         'free_delivery_progress': data['free_delivery_progress'],
@@ -1703,9 +1786,22 @@ def place_order(request):
             messages.error(request, store_error)
             return redirect('cart_view')
         
+        # ✅ Coupon (agar lagaya ho) - dobara parkho; naakaam ho to order rok kar wajah batao
+        from . import coupons as coupon_engine
+        coupon_res = coupon_engine.evaluate_session(
+            request, customer, cart, cart_data['subtotal'], delivery_charges)
+        if coupon_res is not None and not coupon_res.ok:
+            messages.error(request, f'Coupon: {coupon_res.message}')
+            return redirect('checkout')
+        coupon_on = bool(coupon_res and coupon_res.ok)
+        order_fields = store_orders.store_order_fields(cart, cart_data, payment_method)
+        if coupon_on and coupon_res.free_delivery:
+            order_fields['delivery_fee'] = Decimal('0.00')
+        paid_delivery = order_fields.get('delivery_fee', delivery_charges)
+
         # ✅ Create order
         order = SaleOrder.objects.create(
-            **store_orders.store_order_fields(cart, cart_data, payment_method),
+            **order_fields,
             customer=customer,
             warehouse=warehouse,
             order_date=now(),
@@ -1714,11 +1810,12 @@ def place_order(request):
                 f"🌐 WEB ORDER\n"
                 f"Payment: {payment_method}\n"
                 f"Delivery: {delivery_type}\n"
-                f"Delivery Charge: Rs. {delivery_charges}\n"
+                f"Delivery Charge: Rs. {paid_delivery}\n"
                 f"Time: {cart_data['delivery_info']['time_estimate']}"
+                + (f"\nCoupon {coupon_res.coupon.code}: -Rs. {coupon_res.total_saving}" if coupon_on else '')
             ),
-            discount_value=Decimal('0.00'),
-            advance_payment=delivery_charges,  # Delivery charges as advance
+            discount_value=coupon_res.discount if coupon_on else Decimal('0.00'),
+            advance_payment=paid_delivery,  # Delivery charges as advance
             created_by=request.user if request.user.is_authenticated else None,
         )
         
@@ -1748,8 +1845,18 @@ def place_order(request):
                 'total': float(item_total),
             })
         
-        # ✅ Final total with delivery
-        final_total = total_amount + delivery_charges
+        # ✅ Coupon ka istemal likho (limit lock ke saath); na ho paye to discount hat jata hai
+        coupon_discount = Decimal('0.00')
+        if coupon_on:
+            applied, coupon_discount, paid_delivery = coupon_engine.apply_to_new_order(
+                coupon_res, order, customer, delivery_charges)
+            if not applied:
+                order.advance_payment = paid_delivery
+                order.save(update_fields=['advance_payment'])
+        delivery_charges = paid_delivery
+
+        # ✅ Final total with delivery (coupon ke baad)
+        final_total = total_amount - coupon_discount + delivery_charges
 
         # ✅ Vendor ko naye order ki khabar
         store_orders.notify_vendor_new_order(order)
@@ -1769,6 +1876,7 @@ def place_order(request):
         request.session.pop('buy_now_product_id', None)
         request.session.pop('buy_now_item', None)
         request.session.pop('delivery_type', None)
+        request.session.pop('coupon_code', None)
         if not was_buy_now:
             request.session['cart'] = {}  # Buy Now order mein customer ki cart wese hi rehti hai
         request.session.modified = True
@@ -1834,6 +1942,8 @@ def place_order(request):
             'total_amount': final_total,
             'subtotal': total_amount,
             'delivery_charges': delivery_charges,
+            'coupon_discount': coupon_discount,
+            'coupon_code': order.coupon_code,
             'delivery_type': delivery_type,
             'delivery_info': cart_data['delivery_info'],
             'payment_method': payment_method,
@@ -2034,8 +2144,35 @@ def order_detail_customer(request, order_id):
         'can_review': order.status == 'delivered' and review is None and (is_store_order or rider_di is not None),
         'review_rider': rider_di.rider if (rider_di and rider_di.status == 'delivered') else None,
         'rider_di': rider_di,
+        'show_live': bool(rider_di and rider_di.status in ('picked_up', 'in_transit')),
     }
     return render(request, 'customer_portal/order_detail.html', context)
+
+
+@customer_login_required
+def order_live_location(request, order_id):
+    """Customer ke order ka rider-live-location (JSON). Sirf apna order, sirf delivery ke dauran."""
+    if not hasattr(request.user, 'customer_profile'):
+        return JsonResponse({'active': False}, status=403)
+    cp = request.user.customer_profile
+    order = get_object_or_404(SaleOrder, id=order_id, customer=cp.customer)
+    from ..models import DeliveryInfo, VendorProfile
+    di = (DeliveryInfo.objects.filter(sale_order=order, rider__isnull=False,
+          status__in=['picked_up', 'in_transit']).select_related('rider').first())
+    if not di:
+        return JsonResponse({'active': False})          # delivered/cancelled -> tracking band
+    loc = getattr(di.rider, 'live_location', None)
+    vp = VendorProfile.objects.filter(vendor_id=order.vendor_id).first() if order.vendor_id else None
+    data = {'active': True, 'rider': di.rider.name, 'phone': di.rider.phone,
+            'store': [vp.latitude, vp.longitude] if vp and vp.latitude is not None and vp.longitude is not None else None,
+            'dest': [cp.latitude, cp.longitude] if cp.latitude is not None and cp.longitude is not None else None,
+            'pos': None}
+    if loc:
+        age = max(0, int((now() - loc.updated_at).total_seconds()))
+        data['pos'] = [loc.latitude, loc.longitude]
+        data['age_sec'] = age
+        data['stale'] = age > 120                       # 2 min se purani = "location ruk gayi"
+    return JsonResponse(data)
 
 
 # ============================================
@@ -2090,6 +2227,12 @@ def cancel_order_customer(request, order_id):
                                             cancel_msg, kind='warning')
         except Exception:
             logger.exception('Cancel notify error')
+        try:
+            if order.vendor_id:
+                from .. import vendor_push        # vendor ke phone par push (customer ke cancel par)
+                vendor_push.notify_order_cancelled(order.pk)
+        except Exception:
+            logger.exception('Vendor push (cancel) hook error')
         
         return JsonResponse({
             'success': True,

@@ -1,0 +1,84 @@
+{% extends 'customer_portal/base_shop.html' %}
+{% block bottom_nav %}{% endblock %}
+{% load static %}
+
+{% block title %}Rider se cash - {{ company_name }}{% endblock %}
+
+{% block content %}
+<style>
+    body { background: #f3f5ff; }
+    .rc-wrap { max-width: 900px; margin: 24px auto; padding: 0 12px; }
+    .rc-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .rc-top h3 { margin: 0; font-weight: 700; }
+    .rc-btn { text-decoration: none; border: 1px solid #ddd; background: #fff; border-radius: 22px; padding: 7px 16px; color: #333; font-weight: 600; display: inline-block; cursor: pointer; }
+    .rc-btn.ok { background: #16a34a; color: #fff; border: 0; }
+    .rc-btn.no { background: #fff; color: #dc2626; border: 1px solid #dc2626; }
+    .rc-card { background: #fff; border-radius: 20px; padding: 16px 18px; box-shadow: 0 6px 20px rgba(0,0,0,.06); margin-bottom: 12px; }
+    .rc-kpis { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .rc-kpi { flex: 1 0 140px; background: #fff; border-radius: 20px; padding: 14px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+    .rc-kpi b { display: block; font-size: 22px; } .rc-kpi small { color: #777; }
+    .rc-meta { color: #6b7280; font-size: 13px; }
+    .rc-amt { font-size: 22px; font-weight: 700; }
+    .rc-row { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .rc-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+    .rc-form input[type=text] { border: 1px solid #d9dce8; border-radius: 12px; padding: 7px 10px; flex: 1 1 160px; }
+    .rc-chip { border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 700; color: #fff; }
+    .rc-chip.confirmed { background: #16a34a; } .rc-chip.rejected { background: #dc2626; }
+</style>
+
+<div class="rc-wrap">
+    <div class="rc-top">
+        <h3><i class="bi bi-cash-coin"></i> Rider se cash</h3>
+        <a href="{% url 'vendor_dashboard' %}" class="rc-btn"><i class="bi bi-arrow-left"></i> Dashboard</a>
+    </div>
+
+    {% if messages %}{% for m in messages %}
+    <div class="rc-card" style="padding:10px 16px;">{{ m }}</div>
+    {% endfor %}{% endif %}
+
+    <div class="rc-kpis">
+        <div class="rc-kpi"><b>{{ pending|length }}</b><small>Confirm baqi</small></div>
+        <div class="rc-kpi"><b>Rs. {{ pending_total|floatformat:0 }}</b><small>Pending raqam</small></div>
+        <div class="rc-kpi"><b>Rs. {{ confirmed_total|floatformat:0 }}</b><small>Ab tak riders se mila</small></div>
+    </div>
+
+    <h5 style="font-weight:700;">Confirm ka intezar</h5>
+    {% for h in pending %}
+    <div class="rc-card">
+        <div class="rc-row">
+            <div>
+                <div><b>Rider {{ h.rider.name }}</b> <span class="rc-meta">({{ h.rider.phone }})</span></div>
+                <div class="rc-meta">{{ h.created_at|date:"d M Y, h:i A" }}{% if h.note %} &middot; {{ h.note }}{% endif %}</div>
+            </div>
+            <div class="rc-amt">Rs. {{ h.amount|floatformat:0 }}</div>
+        </div>
+        <div class="rc-form">
+            <form method="post" action="{% url 'vendor_rider_cash_action' h.pk 'confirm' %}">{% csrf_token %}
+                <button class="rc-btn ok" onclick="return confirm('Rs. {{ h.amount|floatformat:0 }} mil gaye? Confirm karein.')">&#10003; Cash mil gaya</button>
+            </form>
+            <form method="post" action="{% url 'vendor_rider_cash_action' h.pk 'reject' %}" class="rc-form" style="margin-top:0;flex:1;">{% csrf_token %}
+                <input type="text" name="reason" maxlength="200" placeholder="Reject ki wajah (zaroori)" required>
+                <button class="rc-btn no">Reject</button>
+            </form>
+        </div>
+    </div>
+    {% empty %}
+    <div class="rc-card" style="text-align:center;color:#6b7280;">Koi pending handover nahi.</div>
+    {% endfor %}
+
+    <h5 style="font-weight:700;margin-top:22px;">Purani history</h5>
+    {% for h in history %}
+    <div class="rc-card">
+        <div class="rc-row">
+            <div>
+                <div><b>Rider {{ h.rider.name }}</b> <span class="rc-chip {{ h.status }}">{% if h.status == 'confirmed' %}Confirmed{% else %}Rejected{% endif %}</span></div>
+                <div class="rc-meta">{{ h.created_at|date:"d M Y, h:i A" }}{% if h.note %} &middot; {{ h.note }}{% endif %}{% if h.status == 'rejected' and h.reject_reason %} &middot; Wajah: {{ h.reject_reason }}{% endif %}</div>
+            </div>
+            <div class="rc-amt">Rs. {{ h.amount|floatformat:0 }}</div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="rc-card" style="text-align:center;color:#6b7280;">Abhi koi history nahi.</div>
+    {% endfor %}
+</div>
+{% endblock %}

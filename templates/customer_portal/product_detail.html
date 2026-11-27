@@ -369,6 +369,10 @@
         display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; white-space: nowrap; }
     .pd-buy { border: 0; background: linear-gradient(135deg, #f59e0b, #ef4444); color: #fff; box-shadow: 0 6px 16px rgba(239,68,68,.3); }
     .pd-buy:hover { color: #fff; }
+    .pd-fav { flex: 0 0 50px; width: 50px; height: 50px; border-radius: 50%; border: 1px solid #e5e7eb; background: #fff; color: #9ca3af;
+              font-size: 22px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+    .pd-fav.on { color: #e11d48; border-color: #fecdd3; background: #fff1f2; }
+    .pd-fav:disabled { opacity: .6; }
     .pd-wa { flex: 0 0 50px; width: 50px; height: 50px; border-radius: 50%; background: #25D366; color: #fff; font-size: 26px;
         display: flex; align-items: center; justify-content: center; text-decoration: none; box-shadow: 0 6px 16px rgba(37,211,102,.35); }
     .pd-wa:hover { color: #fff; }
@@ -545,6 +549,9 @@
                             <a href="{% url 'buy_now' product.id %}" class="pd-buy" id="pdBuy">
                                 <i class="bi bi-lightning-charge-fill"></i> Buy Now
                             </a>
+                            <button type="button" class="pd-fav{% if in_wishlist %} on{% endif %}" data-pid="{{ product.id }}"
+                                    data-url="{% url 'wishlist_toggle' product.id %}" data-login="{% url 'customer_login' %}?next={{ request.path|urlencode }}"
+                                    aria-label="Favorites" title="Favorites"><i class="bi {% if in_wishlist %}bi-heart-fill{% else %}bi-heart{% endif %}"></i></button>
                             {% if whatsapp_order_url %}
                             <a href="{{ whatsapp_order_url }}" target="_blank" rel="noopener noreferrer" class="pd-wa" id="pdWa"
                                aria-label="WhatsApp par order karein" title="WhatsApp par order karein"
@@ -556,6 +563,9 @@
                     </div>
                     {% else %}
                     <div class="pd-out"><i class="bi bi-x-circle"></i> Out of stock</div>
+                    <div style="margin-top:10px;"><button type="button" class="pd-fav{% if in_wishlist %} on{% endif %}" data-pid="{{ product.id }}"
+                                    data-url="{% url 'wishlist_toggle' product.id %}" data-login="{% url 'customer_login' %}?next={{ request.path|urlencode }}"
+                                    aria-label="Favorites" title="Favorites"><i class="bi {% if in_wishlist %}bi-heart-fill{% else %}bi-heart{% endif %}"></i></button></div>
                     {% endif %}
 
                     <div class="product-features">
@@ -803,6 +813,30 @@ document.addEventListener('DOMContentLoaded', function() {
     function navH(){ var n=document.querySelector('.app-bottom-nav'); var h=(n&&n.offsetHeight)?n.offsetHeight:64; document.documentElement.style.setProperty('--pd-nav-h', h+'px'); }
     navH(); window.addEventListener('resize',navH); window.addEventListener('load',navH);
     render();
+})();
+</script>
+<script>
+(function(){
+    document.querySelectorAll('.pd-fav').forEach(function(btn){
+        btn.addEventListener('click',function(){
+            btn.disabled=true;
+            fetch(btn.dataset.url,{method:'POST',credentials:'same-origin',
+                headers:{'X-CSRFToken':getCookie('csrftoken'),'X-Requested-With':'XMLHttpRequest'}})
+            .then(function(r){
+                if(r.redirected || (r.headers.get('content-type')||'').indexOf('json')<0){ window.location=btn.dataset.login; return null; }
+                return r.json();
+            })
+            .then(function(d){
+                btn.disabled=false;
+                if(!d) return;
+                if(!d.success){ alert(d.message||'Dobara koshish karein.'); return; }
+                document.querySelectorAll('.pd-fav').forEach(function(b){
+                    b.classList.toggle('on',d.saved);
+                    var i=b.querySelector('i'); if(i){ i.className='bi '+(d.saved?'bi-heart-fill':'bi-heart'); }
+                });
+            }).catch(function(){ btn.disabled=false; alert('Network error, dobara koshish karein.'); });
+        });
+    });
 })();
 </script>
 {% endblock %}

@@ -1,0 +1,47 @@
+name: kconn_customer
+description: Khanewal Connect Customer app (grahak ke liye)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  url_launcher: ^6.3.0
+  # Phase C4: GPS se area, aur tasveeren (cache ke sath)
+  geolocator: ^13.0.1
+  cached_network_image: ^3.4.1
+  # Aglay phases mein judne wale packages (jab zaroorat ho tab pubspec mein lagayenge, build halki rakhne ke liye):
+  #   C10 flutter_map + latlong2 (live tracking, OpenStreetMap)
+  #   C11 firebase_core, firebase_messaging, flutter_local_notifications, permission_handler (push)
+  #   C5+ share_plus
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+  # Splash: app kholte hi narangi rang + icon (safed jhalak nahi)
+  flutter_native_splash: ^2.4.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/app_icon.png
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#E8590C"
+  adaptive_icon_foreground: "assets/icon/app_icon_fg.png"
+
+flutter_native_splash:
+  color: "#E8590C"
+  image: assets/icon/app_icon_fg.png
+  android_12:
+    color: "#E8590C"
+    image: assets/icon/app_icon_fg.png
+    icon_background_color: "#E8590C"

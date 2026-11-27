@@ -1,0 +1,58 @@
+name: kconn_vendor
+description: Khanewal Connect Vendor app (store owner ke liye)
+publish_to: 'none'
+version: 1.0.0+19
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  url_launcher: ^6.3.0
+  # Phase V6: live map (OpenStreetMap, free)
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  # Push (Phase V7): token register, alert, tap par order; channels (awaaz) flutter_local_notifications se
+  firebase_core: '>=3.8.0'
+  firebase_messaging: '>=15.1.0'
+  flutter_local_notifications: ^18.0.1
+  # Phase V7: notification ki ijazat + battery unrestricted (rider app wala wahi version)
+  permission_handler: ^11.3.1
+  # Phase V9-B: product ki photo - camera / gallery (Android 13+ par system photo picker, extra ijazat nahi),
+  # crop (UCropActivity - tool/patch_manifest.py lagata hai) aur upload se pehle compress
+  image_picker: ^1.1.2
+  image_cropper: ^8.0.2
+  flutter_image_compress: ^2.3.0
+  # Phase V15: store ki location verify (GPS, blue tick) - rider app wala wahi version
+  geolocator: ^13.0.2
+  # Phase V11: sales report (CSV / PDF) WhatsApp / email par share
+  share_plus: ^10.1.4
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+  # Phase V17: splash screen (app kholte hi teal rang + icon, safed jhalak nahi)
+  flutter_native_splash: ^2.4.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/app_icon.png
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#0F766E"
+  adaptive_icon_foreground: "assets/icon/app_icon_fg.png"
+
+flutter_native_splash:
+  color: "#0F766E"
+  image: assets/icon/app_icon_fg.png
+  android_12:
+    color: "#0F766E"
+    image: assets/icon/app_icon_fg.png
+    icon_background_color: "#0F766E"

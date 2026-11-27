@@ -1,0 +1,135 @@
+name: Build Vendor Release (Play Store AAB)
+
+# Phase V17. Manual chalayein: GitHub > Actions > "Build Vendor Release (Play Store AAB)" > Run workflow
+# Signed AAB (Play Store par upload ke liye) + signed APK (seedha install / test ke liye) banata hai.
+#
+# GitHub Secrets (Settings > Secrets and variables > Actions) - YEH ZARURI HAIN, repo / zip mein kabhi nahi:
+#   VENDOR_KEYSTORE_BASE64   upload keystore (.jks) ka base64 text      (base64 -w0 vendor-upload.jks)
+#   VENDOR_KEYSTORE_PASSWORD keystore ka password
+#   VENDOR_KEY_ALIAS         key ka alias (keytool mein jo diya)
+#   VENDOR_KEY_PASSWORD      key ka password
+#   GOOGLE_SERVICES_JSON_VENDOR (push ke liye, APK wale workflow jaisa)
+# Keystore banane ka tareeqa aur Play Store ki list: vendor_app/RELEASE.md
+# Version badalna ho to vendor_app/pubspec.yaml ki `version:` aur lib/utils.dart ka `kAppVersion` ek saath badlein.
+on:
+  workflow_dispatch:
+
+env:
+  # App ka naam / package / server - sirf yahin se badlein (build_vendor_apk.yml ke sath ek jaisa rakhein).
+  APP_NAME: 'Vendor App'
+  APP_ID: 'com.khanewal.vendor.app'
+  API_BASE: 'https://khanewalconnect.store'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vendor_app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Signing secrets maujood hain?
+        env:
+          KS: ${{ secrets.VENDOR_KEYSTORE_BASE64 }}
+          KSP: ${{ secrets.VENDOR_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.VENDOR_KEY_ALIAS }}
+          KP: ${{ secrets.VENDOR_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$KS" ]  && missing="$missing VENDOR_KEYSTORE_BASE64"
+          [ -z "$KSP" ] && missing="$missing VENDOR_KEYSTORE_PASSWORD"
+          [ -z "$KA" ]  && missing="$missing VENDOR_KEY_ALIAS"
+          [ -z "$KP" ]  && missing="$missing VENDOR_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Yeh GitHub Secrets nahi mile:$missing  (vendor_app/RELEASE.md dekhein). Debug key se release nahi banti."
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Android project banao (sirf android folder)
+        run: flutter create --platforms=android --org com.khanewal --project-name kconn_vendor .
+
+      - name: Package name (applicationId) lagao
+        run: python3 tool/patch_gradle.py android/app "$APP_ID"
+
+      - name: Permissions + app naam lagao
+        run: python3 tool/patch_manifest.py android/app/src/main/AndroidManifest.xml "$APP_NAME"
+
+      - name: Push notification setup (Firebase)
+        env:
+          GOOGLE_SERVICES_JSON_VENDOR: ${{ secrets.GOOGLE_SERVICES_JSON_VENDOR }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_VENDOR" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_VENDOR" > android/app/google-services.json
+            echo "google-services.json likh di."
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON_VENDOR secret nahi mila - release mein push notification band rahegi."
+          fi
+          python3 tool/patch_push.py android "$APP_ID"
+
+      - name: Notification awaaz + rang lagao
+        run: python3 tool/patch_notification.py android
+
+      # Release signing: keystore secret se (runner par, build ke baad khatam). Repo mein kuch nahi jata.
+      - name: Release signing lagao
+        env:
+          KS: ${{ secrets.VENDOR_KEYSTORE_BASE64 }}
+          KSP: ${{ secrets.VENDOR_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.VENDOR_KEY_ALIAS }}
+          KP: ${{ secrets.VENDOR_KEY_PASSWORD }}
+        run: |
+          python3 tool/patch_signing.py android/app
+          printf '%s' "$KS" | base64 -d > android/app/release.jks
+          {
+            echo "storePassword=$KSP"
+            echo "keyPassword=$KP"
+            echo "keyAlias=$KA"
+            echo "storeFile=release.jks"
+          } > android/key.properties
+
+      - name: Purana auto-generated test hatao
+        run: rm -rf test
+
+      - run: flutter pub get
+
+      - name: App icon banao
+        run: dart run flutter_launcher_icons
+
+      - name: Splash screen banao
+        run: dart run flutter_native_splash:create
+
+      - name: Version dikhao
+        run: grep '^version:' pubspec.yaml
+
+      - name: Build signed AAB (Play Store)
+        run: flutter build appbundle --release --dart-define=API_BASE=${{ env.API_BASE }} --dart-define=APP_NAME="${{ env.APP_NAME }}"
+
+      - name: Build signed APK (seedha install)
+        run: flutter build apk --release --dart-define=API_BASE=${{ env.API_BASE }} --dart-define=APP_NAME="${{ env.APP_NAME }}"
+
+      - name: Files ke naam
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/bundle/release/app-release.aab dist/Vendor-App-release.aab
+          cp build/app/outputs/flutter-apk/app-release.apk dist/Vendor-App-release.apk
+
+      - name: Keystore runner se mita do
+        if: always()
+        run: rm -f android/app/release.jks android/key.properties
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vendor-release
+          path: |
+            vendor_app/dist/Vendor-App-release.aab
+            vendor_app/dist/Vendor-App-release.apk

@@ -1,0 +1,70 @@
+{% extends 'customer_portal/base_shop.html' %}
+{% block bottom_nav %}{% endblock %}
+{% load static %}
+
+{% block title %}Customer Reviews - {{ company_name }}{% endblock %}
+
+{% block content %}
+<style>
+    body { background: #f3f5ff; }
+    .vr-wrap { max-width: 900px; margin: 24px auto; padding: 0 12px; }
+    .vr-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .vr-top h3 { margin: 0; font-weight: 700; }
+    .vr-btn { text-decoration: none; border: 1px solid #ddd; background: #fff; border-radius: 22px; padding: 7px 16px; color: #333; font-weight: 600; display: inline-block; cursor: pointer; }
+    .vr-btn.pri { background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); color: #fff; border: 0; }
+    .vr-btn.on { background: #111827; color: #fff; border: 0; }
+    .vr-card { background: #fff; border-radius: 20px; padding: 16px 18px; box-shadow: 0 6px 20px rgba(0,0,0,.06); margin-bottom: 12px; }
+    .vr-stars { color: #f59e0b; letter-spacing: 1px; } .vr-stars .off { color: #d1d5db; }
+    .vr-meta { color: #6b7280; font-size: 13px; }
+    .vr-reply { background: #f3f4f6; border-radius: 12px; padding: 8px 12px; margin-top: 8px; font-size: 14px; }
+    .vr-form textarea { width: 100%; border: 1px solid #d9dce8; border-radius: 12px; padding: 8px 10px; margin-top: 8px; }
+    .vr-kpis { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .vr-kpi { flex: 1 0 140px; background: #fff; border-radius: 20px; padding: 14px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+    .vr-kpi b { display: block; font-size: 22px; } .vr-kpi small { color: #777; }
+</style>
+
+<div class="vr-wrap">
+    <div class="vr-top">
+        <h3><i class="bi bi-star"></i> Customer Reviews</h3>
+        <a href="{% url 'vendor_dashboard' %}" class="vr-btn"><i class="bi bi-arrow-left"></i> Dashboard</a>
+    </div>
+
+    <div class="vr-kpis">
+        <div class="vr-kpi"><b>{% if avg %}{{ avg }} ★{% else %}&mdash;{% endif %}</b><small>Average rating</small></div>
+        <div class="vr-kpi"><b>{{ count }}</b><small>Total ratings</small></div>
+        <div class="vr-kpi"><b>{{ unanswered_count }}</b><small>Jawab baqi</small></div>
+    </div>
+
+    <div style="margin-bottom:12px;display:flex;gap:8px;">
+        <a href="{% url 'vendor_reviews' %}" class="vr-btn {% if not unanswered %}on{% endif %}">Sab</a>
+        <a href="{% url 'vendor_reviews' %}?unanswered=1" class="vr-btn {% if unanswered %}on{% endif %}">Jawab baqi</a>
+    </div>
+
+    {% for r in rows %}
+    <div class="vr-card">
+        <div style="display:flex;justify-content:space-between;gap:8px;">
+            <b>{{ r.name }}</b><span class="vr-meta">{{ r.rv.created_at|date:"d M Y" }}</span>
+        </div>
+        <div class="vr-stars">{% for i in "12345" %}{% if forloop.counter <= r.rv.vendor_rating %}★{% else %}<span class="off">★</span>{% endif %}{% endfor %}</div>
+        {% if r.rv.vendor_comment %}<div style="margin-top:2px;">{{ r.rv.vendor_comment }}</div>{% else %}<div class="vr-meta">(sirf rating, koi comment nahi)</div>{% endif %}
+        {% if r.rv.vendor_reply %}<div class="vr-reply"><b><i class="bi bi-reply-fill"></i> Aap ka jawab:</b> {{ r.rv.vendor_reply }}</div>{% endif %}
+        <form method="post" action="{% url 'vendor_review_reply' r.rv.id %}" class="vr-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <textarea name="reply" rows="2" maxlength="{{ max_len }}" placeholder="Customer ko jawab likhein (shukriya / maazrat)...">{{ r.rv.vendor_reply }}</textarea>
+            <button type="submit" class="vr-btn pri" style="margin-top:6px;">{% if r.rv.vendor_reply %}Jawab update karein{% else %}Jawab dein{% endif %}</button>
+        </form>
+    </div>
+    {% empty %}
+    <div class="vr-card" style="text-align:center;color:#6b7280;">Abhi koi review nahi.</div>
+    {% endfor %}
+
+    {% if page_obj.has_other_pages %}
+    <div style="display:flex;justify-content:center;gap:8px;margin-top:8px;">
+        {% if page_obj.has_previous %}<a class="vr-btn" href="?page={{ page_obj.previous_page_number }}{% if unanswered %}&unanswered=1{% endif %}">&laquo; Pehle</a>{% endif %}
+        <span class="vr-meta" style="align-self:center;">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a class="vr-btn" href="?page={{ page_obj.next_page_number }}{% if unanswered %}&unanswered=1{% endif %}">Aage &raquo;</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

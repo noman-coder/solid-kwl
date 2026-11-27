@@ -85,8 +85,43 @@
   function toast(t){var el=document.getElementById('toast');el.textContent=t;el.style.display='block';setTimeout(function(){el.style.display='none'},5000);}
   // browser awaaz tab chalne deta hai jab user ne page ko ek dafa touch kiya ho
   document.addEventListener('touchstart',function(){try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();}catch(e){}},{once:true});
+  // ---- Live GPS: sirf tab jab rider ke paas picked_up/in_transit order ho ----
+  var watchId = null, lastSent = 0, wakeLock = null;
+  function csrf(){ var m=document.cookie.match(/csrftoken=([^;]+)/); return m?m[1]:''; }
+  function sendPos(pos){
+    var t = Date.now();
+    if (t - lastSent < 10000) return;                 // 10 second throttle
+    lastSent = t;
+    var c = pos.coords, fd = new FormData();
+    fd.append('lat', c.latitude); fd.append('lng', c.longitude);
+    fd.append('acc', c.accuracy); if (c.speed!=null) fd.append('spd', c.speed);
+    if (c.heading!=null) fd.append('hdg', c.heading);
+    fetch("{% url 'rider_update_location' %}", {method:'POST', body:fd,
+          headers:{'X-CSRFToken': csrf()}, credentials:'same-origin'}).catch(function(){});
+  }
+  function lockScreen(){
+    if ('wakeLock' in navigator)
+      navigator.wakeLock.request('screen').then(function(l){wakeLock=l;}).catch(function(){});
+  }
+  function startGps(){
+    if (watchId!==null || !('geolocation' in navigator)) return;
+    watchId = navigator.geolocation.watchPosition(sendPos, function(err){
+      toast(err.code===1 ? '📍 Location ki ijazat dein (Allow) warna customer ko live map nahi milega'
+                         : '📍 GPS signal nahi mil raha');
+    }, {enableHighAccuracy:true, maximumAge:5000, timeout:20000});
+    lockScreen();
+  }
+  function stopGps(){
+    if (watchId!==null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+    if (wakeLock){ try{wakeLock.release();}catch(e){} wakeLock=null; }
+  }
+  window.__riderGps = function(activeCount){ if (activeCount>0) startGps(); else stopGps(); };
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState==='visible' && watchId!==null) lockScreen();
+  });
   function poll(){
     fetch("{% url 'rider_poll' %}",{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
+      if (window.__riderGps) window.__riderGps(d.active);
       var key = d.offers+'|'+d.assigned;
       if(last!==null && key!==last){
         if(d.offers>(+last.split('|')[0])){beep();toast('🆕 Naya order available!');}

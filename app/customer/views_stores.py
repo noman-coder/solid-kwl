@@ -15,6 +15,7 @@ from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404, render
 
 from ..models import Category, CompanyInfo, Product, ShopBanner, StoreCategory, VendorProfile
+from . import offers as vendor_offers
 from .views_customer_portal import get_cart_count_value, get_delivery_area, get_product_final_price
 from .views_reviews import store_rating_map, store_reviews
 from .geo import attach_distances, format_distance, get_customer_location, haversine_km
@@ -231,6 +232,7 @@ def store_detail(request, pk):
     for key, item in cart.items():
         if (item.get('vendor_id') or 0) == store.vendor_id:
             cart_state[str(key)] = {'qty': int(item.get('quantity', 0) or 0), 'price': float(item.get('price', 0) or 0)}
+    vendor_offers.overlay(list(page_obj))
     for p in page_obj:
         p.final_price = get_product_final_price(p)
         p.has_discount = bool(p.discount_percentage and p.discount_percentage > 0)
@@ -250,7 +252,15 @@ def store_detail(request, pk):
     if customer_loc and store.has_location:
         distance_text = format_distance(haversine_km(customer_loc[0], customer_loc[1], store.latitude, store.longitude))
 
+    # Favorite store (dil) + is store par chalne wale coupons
+    from . import coupons as coupon_engine
+    from .views_extras import favorite_store_ids
+    profile = getattr(request.user, 'customer_profile', None) if request.user.is_authenticated else None
+    store_coupons = coupon_engine.available_for_customer(profile.customer if profile else None, store_id=store.vendor_id)[:3]
+
     return render(request, 'customer_portal/store_detail.html', {
+        'is_favorite': store.pk in favorite_store_ids(request),
+        'store_coupons': store_coupons,
         'reviews': store_reviews(store.vendor),
         'distance_text': distance_text,
         'location_prompt': customer_loc is None,

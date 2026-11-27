@@ -15,6 +15,7 @@ python-barcode>=0.15
 qrcode>=7.4
 num2words>=0.5
 requests>=2.31
+google-auth>=2.30          # Rider app push notification (Firebase Cloud Messaging)
 tzdata                 # time zones on Windows (TIME_ZONE = Asia/Karachi)
 
 # Serving the site (deploy/run_server.py) and static files with DEBUG=False
