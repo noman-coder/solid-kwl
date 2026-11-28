@@ -178,6 +178,8 @@ for need in ('pubspec.yaml', 'assets/icon/app_icon.png', 'assets/icon/app_icon_f
              'lib/screens/login.dart', 'lib/screens/register.dart', 'lib/screens/otp.dart',
              'lib/screens/forgot.dart', 'lib/screens/shell.dart', 'lib/screens/home_tab.dart',
              'lib/screens/area_picker.dart', 'lib/models/home.dart',
+             'lib/screens/stores_tab.dart', 'lib/screens/store_detail.dart', 'lib/models/stores.dart',
+             'lib/widgets/store_card.dart', 'lib/widgets/store_product_tile.dart',
              'tool/patch_gradle.py', 'tool/patch_manifest.py', 'tool/patch_push.py',
              'tool/patch_notification.py'):
     if not os.path.exists(os.path.join(ROOT, need)):

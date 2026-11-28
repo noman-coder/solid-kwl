@@ -7,7 +7,7 @@ from django.conf import settings
 from django.http import JsonResponse, Http404
 from django.shortcuts import redirect
 from django.views.static import serve
-from app import pwa_views
+from app import pwa_views, cdn_proxy
 
 # Custom Handlers
 handler404 = 'app.views.custom_page_not_found'
@@ -25,6 +25,9 @@ def assetlinks(request):
 
 
 urlpatterns = [
+    # Bootstrap / icons served from our own domain (CDN blocked on some ISPs). Only whitelisted files.
+    path('static/cdn/<path:asset>', cdn_proxy.cdn_asset, name='cdn_asset'),
+
     # PWA: own manifest + service worker (keep FIRST, always public)
     path('manifest.json', pwa_views.pwa_manifest, name='pwa_manifest'),
     path('pwa-icons/<str:name>.png', pwa_views.pwa_icon, name='pwa_icon'),

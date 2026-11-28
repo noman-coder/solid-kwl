@@ -48,6 +48,15 @@ class StoreCardTile extends StatelessWidget {
                           const SizedBox(width: 4),
                           const Icon(Icons.verified_rounded, size: 16, color: Color(0xFF2563EB)),
                         ],
+                        if (st.isNew) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(color: kOrangeSoft, borderRadius: BorderRadius.circular(6)),
+                            child: const Text('Naya',
+                                style: TextStyle(color: kOrangeDark, fontSize: 11, fontWeight: FontWeight.w900)),
+                          ),
+                        ],
                       ],
                     ),
                     if (sub.isNotEmpty)
@@ -55,6 +64,12 @@ class StoreCardTile extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(sub,
                             maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kMuted, fontSize: 13)),
+                      ),
+                    if (st.tags.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(st.tags.join(', '),
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kMuted, fontSize: 12.5)),
                       ),
                     const SizedBox(height: 8),
                     Wrap(

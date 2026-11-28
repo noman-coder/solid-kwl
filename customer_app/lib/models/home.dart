@@ -94,6 +94,9 @@ class StoreCard {
   final int timeMax;
   final String distanceText;
   final bool verified;
+  final bool isNew; // naya store (Phase C5; Home ke card par nahi aata to false)
+  final int productCount;
+  final List<String> tags; // top categories (Stores list ke card par)
 
   const StoreCard({
     required this.id,
@@ -115,6 +118,9 @@ class StoreCard {
     required this.timeMax,
     required this.distanceText,
     required this.verified,
+    this.isNew = false,
+    this.productCount = 0,
+    this.tags = const [],
   });
 
   String get timeText => timeMax > 0 ? '$timeMin-$timeMax min' : '';
@@ -139,6 +145,9 @@ class StoreCard {
         timeMax: toI(j['delivery_time_max']),
         distanceText: s(j['distance_text']),
         verified: toB(j['verified']),
+        isNew: toB(j['is_new']),
+        productCount: toI(j['product_count']),
+        tags: j['tags'] is List ? (j['tags'] as List).map(s).where((e) => e.isNotEmpty).toList() : const [],
       );
 }
 

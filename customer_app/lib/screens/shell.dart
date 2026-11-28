@@ -12,10 +12,11 @@ import 'account_tab.dart';
 import 'home_tab.dart';
 import 'login.dart';
 import 'placeholder_tab.dart';
+import 'stores_tab.dart';
 
 /// App ka main screen: 5 tabs (Home, Stores, Cart, Orders, Account).
 /// Guest (bina login) bhi sab tabs dekh sakta hai; login sirf checkout / orders / account jaisi jagah par maanga jata hai.
-/// Home aur Account tab bhare hue hain (Phase C4); baqi tabs aglay phases mein bharte jayenge ("jald aa raha hai").
+/// Home, Stores (Phase C5) aur Account tab bhare hue hain; baqi tabs aglay phases mein bharte jayenge ("jald aa raha hai").
 class CustomerShell extends StatefulWidget {
   const CustomerShell({super.key});
 
@@ -89,7 +90,7 @@ class _CustomerShellState extends State<CustomerShell> {
                 index: tab,
                 children: [
                   const HomeTab(),
-                  const PlaceholderTab(icon: Icons.storefront_outlined, title: 'Stores'),
+                  const StoresTab(),
                   const PlaceholderTab(
                     icon: Icons.shopping_cart_outlined,
                     title: 'Cart khali hai',

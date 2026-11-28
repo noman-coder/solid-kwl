@@ -15,10 +15,11 @@ dependencies:
   # Phase C4: GPS se area, aur tasveeren (cache ke sath)
   geolocator: ^13.0.1
   cached_network_image: ^3.4.1
+  # Phase C5: store ka link share karna
+  share_plus: ^10.1.4
   # Aglay phases mein judne wale packages (jab zaroorat ho tab pubspec mein lagayenge, build halki rakhne ke liye):
   #   C10 flutter_map + latlong2 (live tracking, OpenStreetMap)
   #   C11 firebase_core, firebase_messaging, flutter_local_notifications, permission_handler (push)
-  #   C5+ share_plus
 
 dev_dependencies:
   flutter_lints: ^4.0.0

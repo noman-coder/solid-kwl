@@ -30,6 +30,11 @@ class AppState extends ChangeNotifier {
   /// Area / location badalne par barhta hai - Home (aur aglay phases mein Stores / Products) isay dekh kar dobara load hote hain.
   int areaVersion = 0;
 
+  /// Stores tab ko bheji gayi filter / search (Home ka banner, dukan ki qism, category, search bar se). Har request par
+  /// `storesRequestVersion` barhta hai; Stores tab usay dekh kar apne filters badal leta hai. 'focus': '1' = search box khule.
+  Map<String, String> storesRequest = const {};
+  int storesRequestVersion = 0;
+
   /// Chuna hua area ('' = sab areas). Phone mein save hota hai.
   String get area => Api.area;
   bool get areaChosen => Api.areaChosen;
@@ -105,6 +110,15 @@ class AppState extends ChangeNotifier {
   /// GPS location badli / hatai gayi (faasle dobara hisab hon).
   void locationChanged() {
     areaVersion++;
+    notifyListeners();
+  }
+
+  /// Stores tab kholo (filters ke saath): Home ke banner / dukan ki qism / category / search bar se.
+  /// Params: q, sort, open, free, top, new, type, category, focus.
+  void openStores([Map<String, String> params = const {}]) {
+    storesRequest = Map<String, String>.unmodifiable(params);
+    storesRequestVersion++;
+    tab = 1;
     notifyListeners();
   }
 

@@ -14,8 +14,10 @@ import '../widgets/section_header.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/store_card.dart';
 import 'area_picker.dart';
+import 'store_detail.dart';
 
 /// Home tab (Phase C4): area, search, offers carousel, store types, categories, coupons, offers, stores, recently viewed.
+/// Phase C5: store card / banner / dukan ki qism / category / search bar ab Store page ya Stores tab (filter ke saath) kholte hain.
 ///
 /// - Pull-to-refresh, skeleton loader, error + retry.
 /// - Net band ho to phone mein save kiya hua aakhri Home (shell ki patti 'Internet nahi hai' batati hai).
@@ -105,7 +107,18 @@ class _HomeTabState extends State<HomeTab> {
     final a = b.action;
     if (a.type == 'url' && a.url.isNotEmpty) {
       openUrl(a.relative ? Api.absUrl(a.url) : a.url);
-    } else if (a.type == 'store' || a.type == 'stores') {
+    } else if (a.type == 'store' && a.storeId > 0) {
+      openStore(context, a.storeId);
+    } else if (a.type == 'stores') {
+      AppScope.read(context).openStores(a.params);
+    }
+  }
+
+  /// Product (offers / recently viewed) dabane par uske store ka page; product ka apna page Phase C6 mein.
+  void _openProduct(ProductCard p) {
+    if (p.storeId > 0) {
+      openStore(context, p.storeId);
+    } else {
       _soon();
     }
   }
@@ -166,7 +179,7 @@ class _HomeTabState extends State<HomeTab> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                child: _SearchBar(onTap: () => state.say('Search jald aa raha hai.')),
+                child: _SearchBar(onTap: () => state.openStores(const {'focus': '1'})),
               ),
               if (d.delivery.freeEnabled && d.delivery.freeThreshold > 0)
                 Padding(
@@ -194,7 +207,7 @@ class _HomeTabState extends State<HomeTab> {
                         backgroundColor: Colors.white,
                         side: const BorderSide(color: kBorder),
                         labelStyle: const TextStyle(fontWeight: FontWeight.w700, color: kInk),
-                        onPressed: _soon,
+                        onPressed: () => state.openStores({'type': '${t.id}'}),
                       );
                     },
                   ),
@@ -232,7 +245,9 @@ class _HomeTabState extends State<HomeTab> {
                     separatorBuilder: (_, __) => const SizedBox(width: 10),
                     itemBuilder: (_, i) => _CategoryTileView(
                       tile: d.categories[i],
-                      onTap: () => d.categories[i].isMaster ? _openMaster(d.categories[i].id) : _soon(),
+                      onTap: () => d.categories[i].isMaster
+                          ? _openMaster(d.categories[i].id)
+                          : state.openStores({'category': '${d.categories[i].id}'}),
                     ),
                   ),
                 ),
@@ -252,9 +267,13 @@ class _HomeTabState extends State<HomeTab> {
               ],
               if (d.offers.isNotEmpty) ...[
                 const SectionHeader(title: 'Aaj ke offers'),
-                _ProductRow(items: d.offers, onTap: (_) => _soon()),
+                _ProductRow(items: d.offers, onTap: _openProduct),
               ],
-              SectionHeader(title: d.hasLocation ? 'Aap ke nazdeek stores' : 'Stores'),
+              SectionHeader(
+                title: d.hasLocation ? 'Aap ke nazdeek stores' : 'Stores',
+                action: d.stores.isEmpty ? null : 'Sab dekhein',
+                onAction: () => state.openStores(),
+              ),
               if (d.stores.isEmpty)
                 _NoStores(data: d, onChangeArea: () => showAreaPicker(context))
               else
@@ -265,7 +284,7 @@ class _HomeTabState extends State<HomeTab> {
                       for (final st in d.stores)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 10),
-                          child: StoreCardTile(store: st, onTap: _soon),
+                          child: StoreCardTile(store: st, onTap: () => openStore(context, st.id, preview: st)),
                         ),
                       if (d.storesOutsideCount > 0)
                         Padding(
@@ -280,7 +299,7 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               if (d.recentlyViewed.isNotEmpty) ...[
                 const SectionHeader(title: 'Haal hi mein dekhe'),
-                _ProductRow(items: d.recentlyViewed, onTap: (_) => _soon()),
+                _ProductRow(items: d.recentlyViewed, onTap: _openProduct),
               ],
             ],
           ),

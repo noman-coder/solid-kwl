@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/customer.dart';
 import '../models/home.dart';
+import '../models/stores.dart';
 import '../utils.dart';
 
 /// Server fixed hai (app mein kahin dikhaya nahi jata, customer badal nahi sakta).
@@ -67,6 +68,7 @@ class Api {
   static const String _kLat = 'browse_lat';
   static const String _kLng = 'browse_lng';
   static const String _kHomeCache = 'home_cache_v1';
+  static const String _kStoresCache = 'stores_cache_v1';
 
   /// Internet / server se rabta nahi (aakhri request fail hui) - shell par 'offline' patti dikhti hai.
   /// Kisi bhi request ke kamyab hote hi khud band.
@@ -426,5 +428,60 @@ class Api {
         await _req('DELETE', '/api/customer/location/', notifyAuth: false);
       } catch (_) {}
     }
+  }
+
+  // ------------------------------------------------------------------ stores (Phase C5 ki API)
+
+  /// Area / location ke params (Home jaise): chuna hua area aur GPS (ho to).
+  static Map<String, String> _browseParams() => {
+        if (areaChosen) 'area': area,
+        if (lat != null && lng != null) 'lat': lat!.toStringAsFixed(5),
+        if (lat != null && lng != null) 'lng': lng!.toStringAsFixed(5),
+      };
+
+  /// Stores ki list (filters + sort + page). Bina filter / sort ka pehla page kamyab ho to phone mein save hota hai,
+  /// taake net band ho to dikh sake.
+  static Future<StoreListData> stores(StoreQuery query, {int page = 1}) async {
+    final q = <String, String>{
+      ..._browseParams(),
+      ...query.toParams(),
+      if (page > 1) 'page': '$page',
+    };
+    final path = Uri(path: '/api/customer/stores/', queryParameters: q.isEmpty ? null : q).toString();
+    final d = await _req('GET', path);
+    if (page == 1 && !query.hasFilters && query.sort.isEmpty) {
+      try {
+        final p = await SharedPreferences.getInstance();
+        await p.setString(_kStoresCache, jsonEncode(d));
+      } catch (_) {}
+    }
+    return StoreListData.fromJson(d);
+  }
+
+  /// Phone mein save kiya hua aakhri (bina filter) pehla page. Na ho / kharab ho to null.
+  static Future<StoreListData?> cachedStores() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_kStoresCache);
+      if (raw == null) return null;
+      final m = jsonDecode(raw);
+      return m is Map ? StoreListData.fromJson(Map<String, dynamic>.from(m)) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Ek store ka poora page. `category`: null = sab, 0 = bina category wale.
+  static Future<StoreDetailData> storeDetail(int id, {int? category, String q = '', int page = 1}) async {
+    final params = <String, String>{
+      ..._browseParams(),
+      if (category != null) 'category': '$category',
+      if (q.isNotEmpty) 'q': q,
+      if (page > 1) 'page': '$page',
+    };
+    final path =
+        Uri(path: '/api/customer/stores/$id/', queryParameters: params.isEmpty ? null : params).toString();
+    final d = await _req('GET', path);
+    return StoreDetailData.fromJson(d);
   }
 }

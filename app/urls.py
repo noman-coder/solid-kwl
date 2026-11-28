@@ -30,6 +30,7 @@ from .customer import views_rider_api
 from .customer import views_vendor_api
 from .customer import views_customer_api
 from .customer import views_customer_home      # C4
+from .customer import views_customer_stores    # C5
 from app.views_frontend.system.settings_center import settings_center
 from app.views_frontend.pos_sales import pos as pos_views
 from app.views_frontend.pos_sales import shift as shift_views
@@ -1196,6 +1197,8 @@ urlpatterns = [
      path('api/customer/areas/', views_customer_home.api_areas, name='customer_api_areas'),                   # C4
      path('api/customer/area/', views_customer_home.api_area_set, name='customer_api_area_set'),              # C4
      path('api/customer/location/', views_customer_home.api_location, name='customer_api_location'),          # C4
+     path('api/customer/stores/', views_customer_stores.api_stores, name='customer_api_stores'),             # C5
+     path('api/customer/stores/<int:pk>/', views_customer_stores.api_store_detail, name='customer_api_store_detail'),  # C5
      path('api/customer/otp/send/', views_customer_api.api_otp_send, name='customer_api_otp_send'),
      path('api/customer/otp/verify/', views_customer_api.api_otp_verify, name='customer_api_otp_verify'),
      path('api/customer/forgot-password/', views_customer_api.api_forgot_password, name='customer_api_forgot_password'),
