@@ -14,10 +14,13 @@ import '../widgets/section_header.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/store_card.dart';
 import 'area_picker.dart';
+import 'product_detail.dart';
+import 'search_screen.dart';
 import 'store_detail.dart';
 
 /// Home tab (Phase C4): area, search, offers carousel, store types, categories, coupons, offers, stores, recently viewed.
-/// Phase C5: store card / banner / dukan ki qism / category / search bar ab Store page ya Stores tab (filter ke saath) kholte hain.
+/// Phase C5: store card / banner / dukan ki qism / category ab Store page ya Stores tab (filter ke saath) kholte hain.
+/// Phase C6: search bar ab Search screen kholti hai; product dabane par Product page.
 ///
 /// - Pull-to-refresh, skeleton loader, error + retry.
 /// - Net band ho to phone mein save kiya hua aakhri Home (shell ki patti 'Internet nahi hai' batati hai).
@@ -101,8 +104,6 @@ class _HomeTabState extends State<HomeTab> {
     });
   }
 
-  void _soon() => AppScope.read(context).say('Yeh hissa jald aa raha hai.');
-
   void _openBanner(BannerItem b) {
     final a = b.action;
     if (a.type == 'url' && a.url.isNotEmpty) {
@@ -114,14 +115,8 @@ class _HomeTabState extends State<HomeTab> {
     }
   }
 
-  /// Product (offers / recently viewed) dabane par uske store ka page; product ka apna page Phase C6 mein.
-  void _openProduct(ProductCard p) {
-    if (p.storeId > 0) {
-      openStore(context, p.storeId);
-    } else {
-      _soon();
-    }
-  }
+  /// Product (offers / recently viewed) dabane par uska poora page (Phase C6).
+  void _openProduct(ProductCard p) => openProduct(context, p.id, preview: p);
 
   void _openMaster(int? id) {
     _master = id;
@@ -179,7 +174,7 @@ class _HomeTabState extends State<HomeTab> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                child: _SearchBar(onTap: () => state.openStores(const {'focus': '1'})),
+                child: _SearchBar(onTap: () => openSearch(context)),
               ),
               if (d.delivery.freeEnabled && d.delivery.freeThreshold > 0)
                 Padding(

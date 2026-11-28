@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/customer.dart';
 import 'api.dart';
+import 'cart_controller.dart';
 
 /// Chhota paigham jo shell snackbar mein dikhata hai (login / logout / session khatam).
 class AppEvent {
@@ -22,8 +23,16 @@ class AppState extends ChangeNotifier {
   /// Bottom nav ka tab: 0 Home, 1 Stores, 2 Cart, 3 Orders, 4 Account.
   int tab = 0;
 
-  /// Cart ke items ki ginti (Phase C7 bharegi).
-  int cartCount = 0;
+  /// Cart (Phase C7): login customer ka server cart ya guest ka local cart. Badalne par AppState bhi sunne walon ko batati hai
+  /// (tab ka badge khud badalta hai).
+  final CartController cart = CartController();
+
+  /// Cart ke items ki ginti (tab ke badge ke liye).
+  int get cartCount => cart.count;
+
+  AppState() {
+    cart.addListener(notifyListeners);
+  }
 
   bool refreshing = false;
 
@@ -53,6 +62,7 @@ class AppState extends ChangeNotifier {
     customer = Api.token != null ? Api.cachedCustomer : null;
     booting = false;
     notifyListeners();
+    unawaited(cart.init());
     if (Api.token != null) unawaited(refreshMe());
   }
 
@@ -84,18 +94,26 @@ class AppState extends ChangeNotifier {
     customer = c;
     notifyListeners();
     if (message != null && message.isNotEmpty) say(message);
+    unawaited(_mergeCartAfterLogin());
+  }
+
+  /// Guest ka local cart server cart mein jode (login ke baad); kuch na jur sake to paigham.
+  Future<void> _mergeCartAfterLogin() async {
+    final msg = await cart.onLogin();
+    if (msg.isNotEmpty) say(msg);
   }
 
   Future<void> logout() async {
     await Api.logout();
     customer = null;
-    cartCount = 0;
+    await cart.reset();
     notifyListeners();
     say('Aap logout ho gaye.');
   }
 
   void _onAuthExpired() {
     customer = null;
+    unawaited(cart.reset());
     notifyListeners();
     say('Aap ka session khatam ho gaya. Dobara login karein.');
   }
@@ -134,6 +152,8 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    cart.removeListener(notifyListeners);
+    cart.dispose();
     _events.close();
     super.dispose();
   }

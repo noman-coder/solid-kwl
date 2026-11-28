@@ -31,6 +31,8 @@ from .customer import views_vendor_api
 from .customer import views_customer_api
 from .customer import views_customer_home      # C4
 from .customer import views_customer_stores    # C5
+from .customer import views_customer_products  # C6
+from .customer import views_customer_cart      # C7
 from app.views_frontend.system.settings_center import settings_center
 from app.views_frontend.pos_sales import pos as pos_views
 from app.views_frontend.pos_sales import shift as shift_views
@@ -1199,6 +1201,18 @@ urlpatterns = [
      path('api/customer/location/', views_customer_home.api_location, name='customer_api_location'),          # C4
      path('api/customer/stores/', views_customer_stores.api_stores, name='customer_api_stores'),             # C5
      path('api/customer/stores/<int:pk>/', views_customer_stores.api_store_detail, name='customer_api_store_detail'),  # C5
+     path('api/customer/products/', views_customer_products.api_products, name='customer_api_products'),            # C6
+     path('api/customer/products/<int:pk>/', views_customer_products.api_product_detail, name='customer_api_product_detail'),  # C6
+     path('api/customer/search/suggest/', views_customer_products.api_suggest, name='customer_api_suggest'),         # C6
+    path('api/customer/cart/', views_customer_cart.api_cart, name='customer_api_cart'),                            # C7
+    path('api/customer/cart/count/', views_customer_cart.api_cart_count, name='customer_api_cart_count'),          # C7
+    path('api/customer/cart/add/', views_customer_cart.api_cart_add, name='customer_api_cart_add'),                # C7
+    path('api/customer/cart/update/', views_customer_cart.api_cart_update, name='customer_api_cart_update'),       # C7
+    path('api/customer/cart/remove/', views_customer_cart.api_cart_remove, name='customer_api_cart_remove'),       # C7
+    path('api/customer/cart/clear/', views_customer_cart.api_cart_clear, name='customer_api_cart_clear'),          # C7
+    path('api/customer/cart/ack/', views_customer_cart.api_cart_ack, name='customer_api_cart_ack'),                # C7
+    path('api/customer/cart/merge/', views_customer_cart.api_cart_merge, name='customer_api_cart_merge'),          # C7
+    path('api/customer/cart/preview/', views_customer_cart.api_cart_preview, name='customer_api_cart_preview'),    # C7
      path('api/customer/otp/send/', views_customer_api.api_otp_send, name='customer_api_otp_send'),
      path('api/customer/otp/verify/', views_customer_api.api_otp_verify, name='customer_api_otp_verify'),
      path('api/customer/forgot-password/', views_customer_api.api_forgot_password, name='customer_api_forgot_password'),

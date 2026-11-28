@@ -10,12 +10,14 @@ import '../services/api.dart';
 import '../services/app_state.dart';
 import '../theme.dart';
 import '../utils.dart';
+import '../widgets/cart_actions.dart';
 import '../widgets/content_width.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/net_image.dart';
 import '../widgets/notice_card.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/store_product_tile.dart';
+import 'product_detail.dart';
 
 /// Kisi bhi jagah se store ka page kholo (Home, Stores tab, banner...). `preview` ho to load hote waqt naam dikhta hai.
 Future<void> openStore(BuildContext context, int storeId, {StoreCard? preview}) {
@@ -27,7 +29,7 @@ Future<void> openStore(BuildContext context, int storeId, {StoreCard? preview}) 
 /// Store ka poora page (Phase C5): cover, info card, coupons, sticky category tabs, products (agla page neeche scroll par),
 /// 'store band hai' patti, search, share.
 ///
-/// Band store / khatam stock ke products par 'Add' band. Cart ka kaam Phase C7 mein judega (abhi 'Add' par paigham).
+/// Band store / khatam stock ke products par 'Add' band. 'Add' par product cart mein jata hai (Phase C7).
 class StoreDetailScreen extends StatefulWidget {
   final int storeId;
   final StoreCard? preview;
@@ -213,8 +215,6 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     await Clipboard.setData(ClipboardData(text: code));
     if (mounted) AppScope.read(context).say('Code "$code" copy ho gaya.');
   }
-
-  void _soon(String msg) => AppScope.read(context).say(msg);
 
   void _showRatings(StoreInfo info) {
     showModalBottomSheet<void>(
@@ -619,8 +619,8 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                   padding: const EdgeInsets.only(bottom: 10),
                   child: StoreProductTile(
                     product: sp,
-                    onTap: () => _soon('Product ka page jald aa raha hai.'),
-                    onAdd: () => _soon('Cart ka hissa jald aa raha hai.'),
+                    onTap: () => openProduct(context, sp.card.id, preview: sp.card),
+                    onAdd: () => addProductToCart(context, card: sp.card, stock: sp.stock),
                   ),
                 ),
               ],

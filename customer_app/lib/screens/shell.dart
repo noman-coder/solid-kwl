@@ -9,6 +9,7 @@ import '../utils.dart' show kAppName;
 import '../widgets/app_logo.dart';
 import '../widgets/offline_banner.dart';
 import 'account_tab.dart';
+import 'cart_tab.dart';
 import 'home_tab.dart';
 import 'login.dart';
 import 'placeholder_tab.dart';
@@ -16,7 +17,7 @@ import 'stores_tab.dart';
 
 /// App ka main screen: 5 tabs (Home, Stores, Cart, Orders, Account).
 /// Guest (bina login) bhi sab tabs dekh sakta hai; login sirf checkout / orders / account jaisi jagah par maanga jata hai.
-/// Home, Stores (Phase C5) aur Account tab bhare hue hain; baqi tabs aglay phases mein bharte jayenge ("jald aa raha hai").
+/// Home, Stores (C5), Cart (C7) aur Account tab bhare hue hain; Orders aglay phases mein bharega ("jald aa raha hai").
 class CustomerShell extends StatefulWidget {
   const CustomerShell({super.key});
 
@@ -91,11 +92,7 @@ class _CustomerShellState extends State<CustomerShell> {
                 children: [
                   const HomeTab(),
                   const StoresTab(),
-                  const PlaceholderTab(
-                    icon: Icons.shopping_cart_outlined,
-                    title: 'Cart khali hai',
-                    message: 'Products add karne ka hissa jald aa raha hai.',
-                  ),
+                  const CartTab(),
                   _OrdersTab(loggedIn: state.loggedIn),
                   const AccountTab(),
                 ],

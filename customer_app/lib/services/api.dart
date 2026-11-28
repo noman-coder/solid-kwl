@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/cart.dart';
 import '../models/customer.dart';
 import '../models/home.dart';
+import '../models/products.dart';
 import '../models/stores.dart';
 import '../utils.dart';
 
@@ -69,6 +71,7 @@ class Api {
   static const String _kLng = 'browse_lng';
   static const String _kHomeCache = 'home_cache_v1';
   static const String _kStoresCache = 'stores_cache_v1';
+  static const String _kRecentSearches = 'recent_searches_v1';
 
   /// Internet / server se rabta nahi (aakhri request fail hui) - shell par 'offline' patti dikhti hai.
   /// Kisi bhi request ke kamyab hote hi khud band.
@@ -483,5 +486,114 @@ class Api {
         Uri(path: '/api/customer/stores/$id/', queryParameters: params.isEmpty ? null : params).toString();
     final d = await _req('GET', path);
     return StoreDetailData.fromJson(d);
+  }
+
+  // ------------------------------------------------------------------ products (Phase C6 ki API)
+
+  /// Products ki list / search (filters + sort + page). Guest bhi chalta hai.
+  static Future<ProductListData> products(ProductQuery query, {int page = 1}) async {
+    final q = <String, String>{
+      ..._browseParams(),
+      ...query.toParams(),
+      if (page > 1) 'page': '$page',
+    };
+    final path = Uri(path: '/api/customer/products/', queryParameters: q.isEmpty ? null : q).toString();
+    final d = await _req('GET', path);
+    return ProductListData.fromJson(d);
+  }
+
+  /// Ek product ka poora page (tasveeren, qeemat + offer, stock, store, milte julte).
+  static Future<ProductDetailData> productDetail(int id) async {
+    final params = _browseParams();
+    final path = Uri(path: '/api/customer/products/$id/', queryParameters: params.isEmpty ? null : params).toString();
+    final d = await _req('GET', path);
+    return ProductDetailData.fromJson(d);
+  }
+
+  /// Typing ke waqt halki suggestions (products / stores / categories).
+  static Future<SuggestData> suggest(String q) async {
+    final params = <String, String>{..._browseParams(), 'q': q};
+    final path = Uri(path: '/api/customer/search/suggest/', queryParameters: params).toString();
+    final d = await _req('GET', path);
+    return SuggestData.fromJson(d);
+  }
+
+  // ------------------------------------------------------------------ cart (Phase C7 ki API)
+
+  /// Login customer ka server cart (qeemat / stock taza dekh kar).
+  static Future<CartResult> cart() async => CartResult.fromJson(await _req('GET', '/api/customer/cart/'));
+
+  /// Guest ka local cart dikhane ke liye (qeemat, total, warning). Server par kuch save nahi hota.
+  static Future<CartResult> cartPreview(List<Map<String, int>> items) async =>
+      CartResult.fromJson(await _req('POST', '/api/customer/cart/preview/', body: {'items': items}));
+
+  /// Cart mein dalo. Doosre store ka maal ho to ApiException (code `cart_conflict`); `replace` se purana cart saaf.
+  static Future<CartResult> cartAdd(int productId, int quantity, {bool replace = false}) async =>
+      CartResult.fromJson(await _req('POST', '/api/customer/cart/add/', body: {
+        'product_id': productId,
+        'quantity': quantity,
+        if (areaChosen) 'area': area,
+        if (replace) 'replace_cart': true,
+      }));
+
+  /// Quantity badlo (0 = hata do).
+  static Future<CartResult> cartUpdate(int productId, int quantity) async => CartResult.fromJson(
+      await _req('POST', '/api/customer/cart/update/', body: {'product_id': productId, 'quantity': quantity}));
+
+  static Future<CartResult> cartRemove(int productId) async => CartResult.fromJson(
+      await _req('POST', '/api/customer/cart/remove/', body: {'product_id': productId}));
+
+  static Future<CartResult> cartClear() async =>
+      CartResult.fromJson(await _req('POST', '/api/customer/cart/clear/'));
+
+  /// 'Qeemat badal gayi' alert dekh liya.
+  static Future<CartResult> cartAck() async => CartResult.fromJson(await _req('POST', '/api/customer/cart/ack/'));
+
+  /// Guest ka local cart login ke baad server cart mein jode.
+  static Future<CartResult> cartMerge(List<Map<String, int>> items) async =>
+      CartResult.fromJson(await _req('POST', '/api/customer/cart/merge/', body: {'items': items}));
+
+  // ---- haal ki talashein (sirf phone mein, server par nahi)
+
+  static const int _maxRecentSearches = 8;
+
+  static Future<List<String>> recentSearches() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      return (p.getStringList(_kRecentSearches) ?? <String>[]).where((e) => e.trim().isNotEmpty).toList();
+    } catch (_) {
+      return <String>[];
+    }
+  }
+
+  /// Talash ka lafz sab se upar (duplicate hata kar, kul 8).
+  static Future<List<String>> addRecentSearch(String text) async {
+    final t = text.trim();
+    final list = await recentSearches();
+    if (t.length < 2) return list;
+    list.removeWhere((e) => e.toLowerCase() == t.toLowerCase());
+    list.insert(0, t);
+    if (list.length > _maxRecentSearches) list.removeRange(_maxRecentSearches, list.length);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setStringList(_kRecentSearches, list);
+    } catch (_) {}
+    return list;
+  }
+
+  static Future<void> removeRecentSearch(String text) async {
+    final list = await recentSearches();
+    list.removeWhere((e) => e.toLowerCase() == text.trim().toLowerCase());
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setStringList(_kRecentSearches, list);
+    } catch (_) {}
+  }
+
+  static Future<void> clearRecentSearches() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.remove(_kRecentSearches);
+    } catch (_) {}
   }
 }

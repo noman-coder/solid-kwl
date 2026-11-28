@@ -52,6 +52,7 @@ _MODULES = [
     "trade.rider_push",
     "trade.vendor_push",
     "trade.customer_push",
+    "trade.customer_cart",
     "trade.vendor_stock",
     "trade.vendor_offer",
     "trade.pos_shift",
